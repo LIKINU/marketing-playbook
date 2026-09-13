@@ -1,0 +1,12 @@
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# 项目内部记忆（不进仓库）
+.workbuddy/
+
+# 备份与临时文件
+*.zip
+*.bak

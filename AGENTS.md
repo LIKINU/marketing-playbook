@@ -77,11 +77,42 @@
 
 ---
 
+## 四點五、腳本（**強制層 —— 能跑代碼就必須用**）
+
+`scripts/` 下四個腳本把「流程遵守」從自覺變成機械校驗。**這是本 skill 最強的強制點。**
+
+| 腳本 | 時機 | 不過的後果 |
+|---|---|---|
+| `gate_check.py` | 門禁問完、動筆前 | 缺項 → 禁止產出方案內容 |
+| `budget_check.py` | 寫完預算表 | 分項加總 ≠ 合計 → 不准交付 |
+| `selfcheck.py` | 交付前 | 缺章節／缺自檢單／內部文檔洩漏 → 不准交付 |
+| `build_docx.py` | 出稿 | **先跑 selfcheck，不過就拒絕生成 `.docx`** |
+
+```bash
+pip install python-docx          # 唯一依賴
+python scripts/gate_check.py gate.json
+python scripts/budget_check.py budget.json
+python scripts/selfcheck.py plan.md
+python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方案" --date 2026-09-14
+```
+
+**為什麼這是真強制**：交付物只能由 `build_docx.py` 產出，而它必跑自檢 —— **拿不到 `.docx` 就等於沒完成**，執行者繞不過校驗。這比「靠 AI 自覺讀規則」強一個量級。
+
+**各腳本的輸入格式**（詳見腳本檔頭註解）：
+- `gate.json`：`{"client": "...", "gate": {"賣什麼": "...", ...13 項...}, "rules_table_confirmed": true}`
+- `budget.json`：`{"items": [{"name":"...","amount":3000}], "total": 15000, "unit_economics": {...}}`（也支援直接吃含預算表的 Markdown）
+- `plan.md`：方案正文 Markdown（八篇結構）
+
+**沒有代碼執行能力的平台** → 退回 Markdown 協議（手工對照清單 + 原樣輸出 12 項自檢單 + 附樣式對照說明）。**降級不等於跳步。**
+
+---
+
 ## 五、檔案地圖
 
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
+| `scripts/` | **腳本強制層**：`gate_check.py` / `budget_check.py` / `selfcheck.py` / `build_docx.py` | 有代碼能力時，每個檢查點都跑（見 §四點五） |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
 | `references/打法库.md` | 104 條打法（狀況 → 打法） | **生成方案時最先讀** |

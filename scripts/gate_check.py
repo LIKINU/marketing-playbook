@@ -142,7 +142,28 @@ def main():
         print("→ 請把規則表發給用戶確認，將 rules_table_confirmed 設為 true 後重跑。")
         sys.exit(1)
 
-    print(f"{OK} 門禁通過：13 項齊全 + 規則表已確認 → 可以進入下一步（事實底稿）。")
+    print(f"{OK} 門禁通過：13 項齊全 + 規則表已確認。")
+
+    # ── 第 14 項（2026-09-14 用戶要求「先問用戶要多少」寫進 skill）──
+    #    必須有用戶選定的**交付長度**，否則不准往下走。
+    #    理由：AI 反覆「不問就自己定長度」→ 用戶三次糾正。所以變成機械檢查。
+    delivery = data.get("delivery") or data.get("交付") or data.get("交付規格") or {}
+    target = str(
+        delivery.get("量級") or delivery.get("目标长度") or delivery.get("目標長度")
+        or delivery.get("目標字數") or delivery.get("目标字数") or delivery.get("頁數") or ""
+    ).strip()
+    if not target:
+        print("\n" + "-" * 64)
+        print(f"{NG} 缺少『交付長度』—— 規則表必須記錄用戶選定的長度與效果。")
+        print()
+        print("→ 依門禁第 13 項：**先給用戶「長度 ＋ 效果」選項讓他選**，選完才動筆。")
+        print("   ⛔ 禁止開放式地問「你要多長」；必須給具體選項 + 預估篇幅（用戶才有尺寸感）。")
+        print("   例：\"delivery\": {\"結構\": \"精煉版\", \"量級\": \"5 頁 Word\", \"字數硬要求\": \"無\"}")
+        print("=" * 64)
+        sys.exit(1)
+    print(f"{OK} 交付長度（用戶已選）：{target}")
+
+    print(f"{OK} 門禁通過：13 項 ＋ 規則表已確認 ＋ 交付長度已定 → 可以進入下一步（事實底稿）。")
     sys.exit(0)
 
 

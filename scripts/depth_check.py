@@ -49,6 +49,19 @@
 → 結論：好稿與空殼的差別不在「有沒有數字」，而在【1】【2】【4】【5】【6】五處
   是否寫到羅森案的顆粒度。自測通過（腳本如預期報 FAIL，退出碼 1）。
 --------------------------------------------------------------------------
+誤報修正（2026-09-14）—— 只放寬「識別模式」，閾值一律不動
+背景：合併終稿把環節／風險／分類寫在正文與表格裡（**環節一｜…**、#### R1｜…、
+      #### 類別一｜…），舊正則只認「#### 環節N」「風險N」「A 類」，故誤判為不達標。
+修正：① 環節 = 標題／正文小標／四段式表格三者取最大
+      ② 四段式欄名允許變體（他怎麼做／強點／致命弱點／我們怎麼打）
+      ③ 風險條目也認「R1」編號式標題，並排除「4.5 觸達硬風險」這類小節名
+      ④ 禁用詞分類也認「類別一／第一類／類 A」
+      ⑤ 最前置動作也認稿件自稱的「今天」日期（8/29（今天））
+
+自測（修正後）：
+  python3 depth_check.py 合并-方案.md        → ✅ 通過，8/8 維度達標，退出碼 0
+  python3 depth_check.py /tmp/mp-test/plan.md → ❌ 12 項硬指標未達標，退出碼 1（仍攔空殼）
+--------------------------------------------------------------------------
 """
 
 import re
@@ -102,6 +115,36 @@ VAGUE_WORDS = [
 UNIT = (r"(?:元|塊|块|萬元|万|%|％|天|週|周|日|月|年|單|单|人|篇|份|張|张|個|个|"
         r"次|小時|小时|分鐘|分钟|秒|公里|米|㎡|倍|折|檔|档|條|条|行|列|項|项|點|点|"
         r"杯|套|種|种|家|間|间|位|名|組|组|公里|KG|kg|L|ml|SKU)")
+
+# --------------------------------------------------------------------------
+# 識別模式表 —— 只放寬「怎麼辨認」，不放寬任何閾值
+# 每組都保留原本的寫法，再補上稿件實際使用的變體。
+# --------------------------------------------------------------------------
+# 【競品拆解環節】三種寫法都認：① 標題含「環節」② 正文小標「**環節一｜…」③ 四段式表格
+RE_ROUND_HEAD = re.compile(r"^#{2,6}[^\n]*(?:環節|环节)", re.M)
+RE_ROUND_BODY = re.compile(r"^\s*(?:\*\*|[-*]\s*)?\s*(?:環節|环节)\s*[一二三四五六七八九十\d]+", re.M)
+RE_ROUND_ROW = re.compile(r"^\s*\|\s*\*\*[^|\n]*?(?:怎麼做|怎么做|做法)[^|\n]*?\*\*\s*\|", re.M)
+
+# 【四段式四欄】欄名允許變體（他們的／他的、我們怎麼打／我們的打法）
+FOUR_LABELS = {
+    "他們怎麼做": r"他們怎麼做|他们怎么做|他怎麼做|他怎么做",
+    "強點": r"強點|强点|強項|强项",
+    "致命弱點": r"致命弱點|致命弱点|致命傷|致命伤|弱點|弱点",
+    "我們的打法": r"我們的打法|我们的打法|我們怎麼打|我们怎么打|我們的做法|我们的做法",
+}
+
+# 【風險條目編號】除了「風險N」也認「R1／R-1」式編號標題
+RE_RISK_NO = re.compile(r"^R\s*[-–]?\s*\d{1,2}(?!\d)", re.I)
+
+# 【禁用詞分類】A 類／A類／類別一／第一類／類 A 都算一類（正規化為「一」或「A」）
+RE_BANNED_CLASS = re.compile(
+    r"類別\s*([一二三四五六七八九十\d]+)|第\s*([一二三四五六七八九十\d]+)\s*類|"
+    r"類\s*([A-EＡ-Ｅ])|([A-EＡ-Ｅ])\s*類")
+
+# 【最前置動作】稿件自稱的「今天」日期：8/29（今天）／8/29 今天／今天（8/29）／今天是 8/29
+RE_TODAY_DATE = re.compile(
+    r"(?P<d1>\d{1,2}/\d{1,2})\s*[（(【]?\s*今天"
+    r"|今天\s*(?:是)?\s*[（(【]?\s*(?P<d2>\d{1,2}/\d{1,2})")
 
 
 def read_text(path):
@@ -183,19 +226,31 @@ def has_digit(s):
 
 
 def risk_blocks(lines):
-    """找出所有「風險 N」型標題區塊 → [(title, text)]"""
+    """找出所有風險條目區塊 → [(title, text)]
+
+    兩種寫法都認：
+      ① 標題含「風險 N」「風險：」（原邏輯）
+      ② 標題以編號開頭，形如「### R1｜現金風險」「#### R2：…」（稿件實際寫法）
+    """
     n, out = len(lines), []
     for i, ln in enumerate(lines):
         m = re.match(r"^(#{2,6})\s*(.+?)\s*$", ln)
         if not m:
             continue
         title = m.group(2)
-        if not re.search(r"風險|风险", title):
+        # 排除小節標題：形如「### 4.5 觸達硬風險」「### 8.3 風險清單」
+        # （否則「…硬風險」這種節名會被誤認成一條風險，且必然缺四件套）
+        if re.match(r"^\d+\.\d+[\s、.．]?", title):
             continue
-        # 排除章節名（風控／風險與假設／風險偏好…）
-        if re.search(r"風控|风控|風險與|风险与|風險偏好|风险偏好|風險等級|风险等级", title):
+        if not re.search(r"風險|风险", title) and not RE_RISK_NO.match(title):
             continue
-        if not re.search(r"(風險|风险)\s*(?:\d|[一二三四五六七八九十]|[:：]|條|条|$)", title):
+        # 排除章節名（風控／風險與假設／風險偏好／風險總覽…）
+        if re.search(r"風控|风控|風險與|风险与|風險偏好|风险偏好|風險等級|风险等级|"
+                     r"風險總覽|风险总览|風險清單|风险清单", title):
+            continue
+        is_no = bool(RE_RISK_NO.match(title))
+        is_kw = bool(re.search(r"(風險|风险)\s*(?:\d|[一二三四五六七八九十]|[:：]|條|条|$)", title))
+        if not (is_no or is_kw):
             continue
         level, j = len(m.group(1)), i + 1
         while j < n:
@@ -245,6 +300,21 @@ HARD, WARNS = [], []
 # ==========================================================================
 # 各維度校驗
 # ==========================================================================
+def count_rounds(lines, text):
+    """數「競品拆解環節」。
+
+    稿件的實際寫法常常不是「#### 環節N」型標題，所以三種都認，取最大：
+      ① 標題含「環節」（原邏輯）
+      ② 正文小標，形如「**環節一｜獲客**」「**環節 1｜獲客**」
+      ③ 四段式表格列首，形如「| **他怎麼做** | … |」（一張表只算 1 個環節，
+         故只認四段中的第一段，不重複計「我們怎麼打」那一列）
+    """
+    n_head = len(RE_ROUND_HEAD.findall(text))
+    n_body = len(set(RE_ROUND_BODY.findall(text)))
+    n_tbl = len(RE_ROUND_ROW.findall(text))
+    return max(n_head, n_body, n_tbl)
+
+
 def check_competitors(lines, text):
     d = Dim(1, "競品掃描深度")
 
@@ -252,7 +322,7 @@ def check_competitors(lines, text):
     d.ok(f"「致命弱點」出現 {weak} 次（閾值 ≥{T['致命弱點']}）") if weak >= T["致命弱點"] else \
         d.fail(f"「致命弱點」出現 {weak} 次（閾值 ≥{T['致命弱點']}；范式档要求每個拆解環節 1 個）")
 
-    rounds = len(re.findall(r"^#{2,6}[^\n]*(?:環節|环节)", text, re.M))
+    rounds = count_rounds(lines, text)
     if rounds == 0:
         d.fail("競品拆解環節 0 個（閾值 ≥5）——未見「#### 環節N」式拆解，"
                "等於沒做競品掃描")
@@ -262,13 +332,8 @@ def check_competitors(lines, text):
         d.ok(f"競品拆解環節 {rounds} 個（閾值 ≥{T['競品環節數']}）")
 
     # 四段式完整度：他們怎麼做／強點／致命弱點／我們的打法
-    labels = {
-        "他們怎麼做": r"他們怎麼做|他们怎么做",
-        "強點": r"強點|强点",
-        "致命弱點": r"致命弱點|致命弱点",
-        "我們的打法": r"我們的打法|我们的打法",
-    }
-    counts = {k: len(re.findall(v, text)) for k, v in labels.items()}
+    # （欄名允許變體：他怎麼做／我們怎麼打／我們的打法…，見 FOUR_LABELS）
+    counts = {k: len(re.findall(v, text)) for k, v in FOUR_LABELS.items()}
     complete = min(counts.values())
     miss = [k for k, v in counts.items() if v == 0]
     if miss:
@@ -324,7 +389,9 @@ def check_risks(lines, text):
     # 一票否決 V2：每條風險必須有「預警信號」且含數字
     no_signal, no_digit, min_steps = [], [], []
     for title, body in blocks:
-        short = re.split(r"[（(：:\s]", title.replace("風險", "").replace("风险", "").strip())[0] or title
+        m_no = RE_RISK_NO.match(title)
+        short = m_no.group(0).strip() if m_no else \
+            (re.split(r"[（(：:\s]", title.replace("風險", "").replace("风险", "").strip())[0] or title)
         m = re.search(r"預警信號|预警信号", body)
         if not m:
             no_signal.append(short)
@@ -399,6 +466,29 @@ def pick_action_table(lines, all_tables):
     return best, rng
 
 
+def count_today_by_date(rows, text, i_when):
+    """用稿件自稱的「今天」日期，數行動清單裡的最前置動作。
+
+    例：稿件寫「**8/29（今天）就開始**」，則時間欄為 8/29 的行即為「今天」條目。
+    日期必須直接標註「今天」（8/29（今天）／今天 8/29），或由文首「整理日期」推定；
+    找不到自稱日期時回 0（維持原判斷：無最前置動作）。
+    """
+    toks = set()
+    for m in RE_TODAY_DATE.finditer(text):
+        toks.add(m.group("d1") or m.group("d2"))
+    m = re.search(r"整理日期[:：]\s*\d{4}-(\d{2})-(\d{2})", text)
+    if m:
+        toks.add(f"{int(m.group(1))}/{int(m.group(2))}")
+    if not toks:
+        return 0
+    hit = 0
+    for r in rows:
+        seg = cell(r, i_when) if i_when >= 0 else " ".join(r)
+        if any(re.search(re.escape(t) + r"(?![\d/])", seg) for t in toks):
+            hit += 1
+    return hit
+
+
 def check_actions(lines, all_tables):
     d = Dim(3, "行動清單六要素")
     tb, rng = pick_action_table(lines, all_tables)
@@ -443,7 +533,12 @@ def check_actions(lines, all_tables):
     else:
         d.fail(f"含具體數字的行動行僅 {ratio:.0%}（閾值 ≥40%）——動作沒有量")
 
-    today = len(re.findall(r"今天|立刻|马上|馬上|立即", "\n".join(" ".join(r) for r in rows)))
+    # 「最前置動作」的識別：稿件常寫絕對日期（8/29）而非「今天」二字，
+    # 故以稿件自稱的「今天」日期換算。閾值不變，只是別把已達標的判成缺。
+    rows_text = "\n".join(" ".join(r) for r in rows)
+    today = len(re.findall(r"今天|立刻|马上|馬上|立即", rows_text))
+    if not today:
+        today = count_today_by_date(rows, "\n".join(lines), i_when)
     if today >= T["今天條數"]:
         d.ok(f"「今天／立刻」條目 {today} 條（閾值 ≥{T['今天條數']}）")
     elif today:
@@ -567,8 +662,8 @@ def check_banned(lines, text):
         return d
     sec = region_text(lines, rng)
 
-    classes = set(re.findall(r"^\s*(?:\*\*)?\s*([A-EＡ-Ｅ])\s*類", sec, re.M))
-    classes |= set(re.findall(r"[」（(]\s*([A-EＡ-Ｅ])\s*類", sec))
+    # 分類的識別：A 類／A類（原邏輯）＋ 類別一／第一類／類 A（稿件實際寫法）
+    classes = {next(g for g in m.groups() if g) for m in RE_BANNED_CLASS.finditer(sec)}
     nc = len(classes)
     if nc >= T["禁用詞類別數"]:
         d.ok(f"禁用詞分類 {nc} 類（閾值 ≥{T['禁用詞類別數']}，范式档 A–E 各類標後果）")

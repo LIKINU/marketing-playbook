@@ -206,6 +206,8 @@ def main():
     ap.add_argument("--author", default="", help="封面署名")
     ap.add_argument("--banned", default="", help="自訂禁用詞表 JSON")
     ap.add_argument("--rules", default="", help="《任務規則表》JSON —— **沒提供會拒絕出稿**（用來強制『先問用戶』）")
+    ap.add_argument("--no-cover", action="store_true", help="不生成封面（省約 1 頁）—— 頁數緊張時用")
+    ap.add_argument("--no-toc", action="store_true", help="不生成目錄（省約 1 頁）—— 5 頁以內的小文檔建議加上")
     ap.add_argument("--skip-check", action="store_true", help="跳過自檢（僅內部預覽，不建議）")
     ap.add_argument("--force", action="store_true",
                     help="緊急出口（協議 8）：跳過自檢強制生成。交付時必須聲明「本稿未通過校驗」並列出未通過項")
@@ -303,37 +305,47 @@ def main():
     normal.font.size = Pt(10.5)
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), CN_FONT)
 
-    # ---- 封面 ----
-    for _ in range(4):
-        doc.add_paragraph()
-    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run(args.title); set_run_font(r, size=24, bold=True)
-    if args.subtitle:
+    # ---- 封面（--no-cover 可省約 1 頁）----
+    if args.no_cover:
+        # 不生成封面頁：標題直接做首行
         p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(args.subtitle); set_run_font(r, size=14, color=RGBColor(0x44, 0x44, 0x44))
-    for _ in range(6):
-        doc.add_paragraph()
-    if args.date:
+        r = p.add_run(args.title); set_run_font(r, size=17, bold=True)
+        meta = " ｜ ".join(x for x in [args.subtitle, args.date] if x)
+        if meta:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(meta); set_run_font(r, size=10, color=RGBColor(0x55, 0x55, 0x55))
+    else:
+        for _ in range(4):
+            doc.add_paragraph()
         p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(args.date); set_run_font(r, size=12)
-    if args.author:
-        p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(args.author); set_run_font(r, size=12)
+        r = p.add_run(args.title); set_run_font(r, size=24, bold=True)
+        if args.subtitle:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(args.subtitle); set_run_font(r, size=14, color=RGBColor(0x44, 0x44, 0x44))
+        for _ in range(6):
+            doc.add_paragraph()
+        if args.date:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(args.date); set_run_font(r, size=12)
+        if args.author:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(args.author); set_run_font(r, size=12)
 
-    # ---- 目錄（手工生成，不用域，避免打開時空白） ----
-    doc.add_page_break()
-    h = doc.add_heading(level=1); r = h.add_run("目錄"); set_run_font(r, size=18, bold=True)
-    tmp_doc = Document()  # 先掃一遍拿標題
+    # ---- 目錄（--no-toc 可省約 1 頁；5 頁以內的小文檔建議省掉）----
     headings = []
     for ln in md_body.splitlines():
         m = re.match(r"^(#{1,3})\s+(.*)$", ln.strip())
         if m:
             headings.append((len(m.group(1)), strip_inline(m.group(2)).strip()))
-    for lvl, text in headings:
-        p = doc.add_paragraph()
-        p.paragraph_format.left_indent = Cm(0.5 * (lvl - 1))
-        p.paragraph_format.space_after = Pt(2)
-        r = p.add_run(text); set_run_font(r, size=10.5 if lvl > 1 else 11.5, bold=(lvl == 1))
+    if not args.no_toc:
+        doc.add_page_break()
+        h = doc.add_heading(level=1); r = h.add_run("目錄"); set_run_font(r, size=18, bold=True)
+        for lvl, text in headings:
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent = Cm(0.5 * (lvl - 1))
+            p.paragraph_format.space_after = Pt(2)
+            r = p.add_run(text); set_run_font(r, size=10.5 if lvl > 1 else 11.5, bold=(lvl == 1))
+        doc.add_page_break()
 
     # ---- 正文 ----
     doc.add_page_break()

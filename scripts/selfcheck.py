@@ -218,4 +218,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{WARN} 已中斷（Ctrl+C）。")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n{NG} 腳本執行出錯：{type(e).__name__}: {e}")
+        print("→ 依協議 8（卡死處理）：")
+        print("   1) 依上面訊息修正後重跑；")
+        print("   2) 若屬環境問題（檔案讀不到／編碼異常），改用 Markdown 協議手工比對 §六 清單，不要卡在這裡；")
+        print("   3) 同一項連續 2 次不過 → 停止重試，把問題攤給用戶決定。")
+        sys.exit(2)

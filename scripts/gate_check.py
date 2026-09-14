@@ -147,4 +147,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{NG} 已中斷（Ctrl+C）。")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n{NG} 腳本執行出錯：{type(e).__name__}: {e}")
+        print("→ 依協議 8（卡死處理）：")
+        print("   1) 依上面訊息修正後重跑；")
+        print("   2) 若 JSON 格式有問題，用 --help 看輸入範例；")
+        print("   3) 仍不行 → 手工核對 13 項門禁齊不齊，在回覆中列出，不要卡在這裡。")
+        sys.exit(2)

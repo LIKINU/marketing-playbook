@@ -206,13 +206,19 @@ def main():
     ap.add_argument("--author", default="", help="封面署名")
     ap.add_argument("--banned", default="", help="自訂禁用詞表 JSON")
     ap.add_argument("--skip-check", action="store_true", help="跳過自檢（僅內部預覽，不建議）")
+    ap.add_argument("--force", action="store_true",
+                    help="緊急出口（協議 8）：跳過自檢強制生成。交付時必須聲明「本稿未通過校驗」並列出未通過項")
     args = ap.parse_args()
 
     # ---- 前置：跑 selfcheck ----
-    if args.skip_check:
+    if args.skip_check or args.force:
         print("=" * 64)
-        print(f"{WARN} 已跳過交付前自檢（--skip-check）。")
-        print(f"{WARN} 這份檔案不得作為對外交付物使用（協議 3）。")
+        print(f"{WARN} 緊急出口：已跳過交付前自檢。")
+        print(f"{WARN} 依協議 8，交付時你【必須】：")
+        print("       ① 明確聲明「本稿未通過交付前校驗」")
+        print("       ② 列出未校驗的項目")
+        print("       ③ 不得聲稱已完成")
+        print("       （建議先跑 selfcheck.py 看看到底卡在哪，再決定要不要跳）")
         print("=" * 64)
     else:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -297,4 +303,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{WARN} 已中斷（Ctrl+C），未產生輸出檔。")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n{NG} 腳本執行出錯：{type(e).__name__}: {e}")
+        print("→ 依協議 8（卡死處理）：")
+        print("   1) 依上面訊息修正後重跑；")
+        print("   2) 若屬環境問題（缺 python-docx／無寫入權限），改用 Markdown 協議出稿，不要卡在這裡；")
+        print("   3) 或加 --force 跳過校驗（交付時須聲明未校驗）。")
+        sys.exit(2)

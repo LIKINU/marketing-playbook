@@ -174,4 +174,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{WARN} 已中斷（Ctrl+C）。")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n{NG} 腳本執行出錯：{type(e).__name__}: {e}")
+        print("→ 依協議 8（卡死處理）：")
+        print("   1) 依上面訊息修正後重跑；")
+        print("   2) 若 Markdown 表格解析失敗，改用 JSON 輸入；")
+        print("   3) 仍不行 → 手工核對「分項加總 = 合計」，在交付說明裡註明未經腳本校驗。")
+        sys.exit(2)

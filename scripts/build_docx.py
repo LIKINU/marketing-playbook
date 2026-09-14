@@ -222,19 +222,32 @@ def main():
         print("=" * 64)
     else:
         here = os.path.dirname(os.path.abspath(__file__))
-        cmd = [sys.executable, os.path.join(here, "selfcheck.py"), args.md]
-        if args.banned:
-            cmd += ["--banned", args.banned]
-        print("→ 先跑交付前自檢 selfcheck.py ...\n")
-        rc = subprocess.call(cmd)
-        if rc != 0:
-            print("\n" + "=" * 64)
-            print(f"{NG} 自檢未通過 → 拒絕生成 .docx。")
-            print("→ 修正自檢指出的硬錯誤後重跑；這是協議 3 的強制點。")
+        checks = [
+            ("交付前自檢 selfcheck.py",
+             [sys.executable, os.path.join(here, "selfcheck.py"), args.md]
+             + (["--banned", args.banned] if args.banned else [])),
+            ("深度校驗 depth_check.py",
+             [sys.executable, os.path.join(here, "depth_check.py"), args.md]),
+        ]
+        failed = []
+        for name, cmd in checks:
+            if not os.path.exists(cmd[1]):
+                print(f"{WARN} 找不到 {cmd[1]}，跳過「{name}」（不阻塞出稿，但請留意）\n")
+                continue
+            print(f"→ 先跑{name} ...\n")
+            if subprocess.call(cmd) != 0:
+                failed.append(name)
+            print()
+        if failed:
+            print("=" * 64)
+            print(f"{NG} 校驗未通過 → 拒絕生成 .docx。未通過項：{'、'.join(failed)}")
+            print("→ 修正後重跑；這是協議 3 的強制點。")
+            print("→ 依協議 8：同一項連續 2 次不過就停止重試，把問題攤給用戶；")
+            print("   或經用戶同意用 --force 出稿（交付時必須聲明未校驗）。")
             print("=" * 64)
             sys.exit(1)
         print("=" * 64)
-        print(f"{OK} 自檢通過 → 開始生成 Word。")
+        print(f"{OK} 兩項校驗通過 → 開始生成 Word。")
         print("=" * 64)
 
     with open(args.md, "r", encoding="utf-8") as f:

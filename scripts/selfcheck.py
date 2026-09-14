@@ -128,10 +128,15 @@ def main():
         warnings.append(f"✅/❌ 標記只有 {box_count} 個，自檢單可能沒逐項標")
 
     # 3) 內部過程文檔洩漏
+    #    ⚠️ 注意（死結修正）：交付稿的「附件 C」按 SKILL.md §三 明文就叫「事實底稿」，
+    #    所以檢查必須跳過「附件／附錄」之後的區域 —— 否則一份完全合規的稿必然被判違規，
+    #    build_docx 永久拒絕出稿（強制層反而變成阻塞層）。
     if not quiet:
-        print("\n【3】內部過程文檔檢查（不得出現在交付稿）")
-    leaks = sorted({k for k in INTERNAL_LEAK_HARD if k in text})
-    soft_leaks = sorted({k for k in INTERNAL_LEAK_SOFT if k in text})
+        print("\n【3】內部過程文檔檢查（不得出現在正文；附件區除外）")
+    m_appendix = re.search(r"\n#{1,4}\s*(附件|附錄|附录)\s*[A-D]?\s*[:：·]?\s", text)
+    body_scope = text[:m_appendix.start()] if m_appendix else text
+    leaks = sorted({k for k in INTERNAL_LEAK_HARD if k in body_scope})
+    soft_leaks = sorted({k for k in INTERNAL_LEAK_SOFT if k in body_scope})
     if leaks:
         for k in leaks:
             if not quiet:

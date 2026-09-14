@@ -222,11 +222,15 @@ def main():
         print("=" * 64)
     else:
         here = os.path.dirname(os.path.abspath(__file__))
+        # ① 強制門檻：selfcheck（結構完整性 —— 缺章節、缺自檢單、內部文檔洩漏）
         checks = [
             ("交付前自檢 selfcheck.py",
              [sys.executable, os.path.join(here, "selfcheck.py"), args.md]
              + (["--banned", args.banned] if args.banned else [])),
-            ("深度校驗 depth_check.py",
+        ]
+        # ② 只報告、不設門檻：depth_check（要素厚薄 —— 用戶定調 2026-09-14：只提示不攔）
+        advisory = [
+            ("深度診斷 depth_check.py",
              [sys.executable, os.path.join(here, "depth_check.py"), args.md]),
         ]
         failed = []
@@ -240,14 +244,22 @@ def main():
             print()
         if failed:
             print("=" * 64)
-            print(f"{NG} 校驗未通過 → 拒絕生成 .docx。未通過項：{'、'.join(failed)}")
+            print(f"{NG} 結構校驗未通過 → 拒絕生成 .docx。未通過項：{'、'.join(failed)}")
             print("→ 修正後重跑；這是協議 3 的強制點。")
             print("→ 依協議 8：同一項連續 2 次不過就停止重試，把問題攤給用戶；")
             print("   或經用戶同意用 --force 出稿（交付時必須聲明未校驗）。")
             print("=" * 64)
             sys.exit(1)
+
+        # 深度診斷：只印報告，**不阻攔出稿**
+        for name, cmd in advisory:
+            if os.path.exists(cmd[1]):
+                print(f"→ 跑{name}（僅診斷，不阻攔出稿）...\n")
+                subprocess.call(cmd)
+                print()
+
         print("=" * 64)
-        print(f"{OK} 兩項校驗通過 → 開始生成 Word。")
+        print(f"{OK} 結構校驗通過 → 開始生成 Word。（深度診斷僅供參考，不影響出稿）")
         print("=" * 64)
 
     with open(args.md, "r", encoding="utf-8") as f:

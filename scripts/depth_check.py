@@ -1079,16 +1079,21 @@ def main():
 
     print("\n" + "=" * 64)
     if HARD:
-        print(f"{NG} 深度校驗不通過：{len(HARD)} 項硬指標未達標")
+        # ── 用戶定調（2026-09-14）：**只提示、不阻攔** ──
+        #    理由：① 嚴格數量門檻會逼出「資料彙編」，而精煉的羅森案原版自己都過不了；
+        #          ② 方案長短與要素多少應由**用戶選擇**（門禁第 13 項先問），不由腳本判定。
+        #    所以此處一律打印診斷報告並 **exit 0**，改不改由使用者決定。
+        print(f"{INFO} 診斷報告：{len(HARD)} 項「要素偏薄／可再加厚」——**僅供參考，不阻攔出稿**")
         for e in HARD:
             print(f"   · {e}")
         if WARNS:
-            print(f"\n{WARN} {len(WARNS)} 項警告")
+            print(f"\n{WARN} {len(WARNS)} 項提示")
             for w in WARNS:
                 print(f"   · {w}")
-        print("\n→ 這些是「結構完整但內容空」的典型信號。補完後重跑。")
-        print(f"   （本次 {passed}/{len(dims)} 個維度無硬指標不達標）")
-        sys.exit(1)
+        print("\n→ 要不要按以上提示加厚，**由你（或用戶）決定**：")
+        print("   本檢查不設門檻、不阻攔出稿；羅森案原版（精煉版）同樣會有這些提示。")
+        print(f"   （本次 {passed}/{len(dims)} 個維度達標）")
+        sys.exit(0)
 
     print(f"{OK} 深度校驗通過（{passed}/{len(dims)} 個維度達標，硬指標 0 項未達標）。")
     if WARNS:

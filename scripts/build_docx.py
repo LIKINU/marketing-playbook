@@ -205,12 +205,36 @@ def main():
     ap.add_argument("--date", default="", help="封面日期")
     ap.add_argument("--author", default="", help="封面署名")
     ap.add_argument("--banned", default="", help="自訂禁用詞表 JSON")
+    ap.add_argument("--rules", default="", help="《任務規則表》JSON —— **沒提供會拒絕出稿**（用來強制『先問用戶』）")
     ap.add_argument("--skip-check", action="store_true", help="跳過自檢（僅內部預覽，不建議）")
     ap.add_argument("--force", action="store_true",
                     help="緊急出口（協議 8）：跳過自檢強制生成。交付時必須聲明「本稿未通過校驗」並列出未通過項")
     args = ap.parse_args()
 
     # ---- 前置：跑 selfcheck ----
+    # ── 硬前提：必須先有《任務規則表》＝ 先問過用戶要什麼結構／量級／字數 ──
+    #    2026-09-14 用戶指出：AI 常常「不問就開跑」，門禁只覆蓋新項目、
+    #    覆蓋不到「重新生成／改結構」這類任務。所以把「問用戶」變成機械前提：
+    #    **拿不到規則表 → 出不了稿。**
+    if not args.rules and not (args.force or args.skip_check):
+        print("=" * 64)
+        print(f"{NG} 拒絕出稿：未提供《任務規則表》（--rules）")
+        print()
+        print("這通常意味著：**你沒有先問過用戶**這三件事 ——")
+        print("   ① 交付結構（**精煉版**：只放能執行的／**完整版**：含現狀分析）")
+        print("   ② 內容量級（**摘要版** 1–2 頁／**標準版**／**完整版**）")
+        print("   ③ 有沒有字數或頁數的硬要求")
+        print()
+        print("→ 做法：先跑 `gate_check.py` 產出《任務規則表》並請用戶確認，再出稿。")
+        print("→ 若用戶已明確同意跳過，加 `--force`（交付時必須聲明未經門禁）。")
+        print("=" * 64)
+        sys.exit(1)
+    if args.rules:
+        if not os.path.exists(args.rules):
+            print(f"{NG} 找不到《任務規則表》檔案：{args.rules}")
+            sys.exit(1)
+        print(f"{OK} 已提供《任務規則表》：{args.rules}")
+
     if args.skip_check or args.force:
         print("=" * 64)
         print(f"{WARN} 緊急出口：已跳過交付前自檢。")

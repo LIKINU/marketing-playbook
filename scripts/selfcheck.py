@@ -229,23 +229,37 @@ def main():
     if not quiet:
         print("\n【7】核心方法論要素（打法組合表／問題類型／失敗歸因編號／可抄案例）")
 
-    # 7a 打法組合表 —— 硬錯誤（這是本 skill 的核心產物）
-    combo = re.search(r"(?m)^\|[^\n]*(為什麼用它|为什么用它)[^\n]*\|", text)
-    if combo:
-        hdr = combo.group(0)
-        cols = [c.strip() for c in hdr.strip("|").split("|")]
-        # ⚠️ 繁简任一命中即可（修正 2026-09-16：此前要求繁简全中，簡體稿永遠誤報缺列）
-        groups = {"打法": ["打法"], "具體動作": ["具體動作", "具体动作"], "誰做": ["誰做", "谁做"]}
-        missing = [name for name, alts in groups.items() if not any(a in hdr for a in alts)]
+    # 7a 打法組合 —— 硬錯誤（形式不限：多段文字 或 表格）
+    #    2026-09-16 修正：8 列寬表在 Word 裡會擠成一條豎線（用戶實測反饋），
+    #    推薦「多段文字」形式 → 校驗改為看「要素標籤」而非表頭。
+    combo_marks = re.findall(r"(?m)^\*\*打法\s*\d+", text)
+    table_head = re.search(r"(?m)^\|[^\n]*(為什麼用它|为什么用它)[^\n]*\|", text)
+    labels = {
+        "为什么用它": ["為什麼用它", "为什么用它"],
+        "具体动作": ["具體動作", "具体动作"],
+        "谁做": ["誰做", "谁做"],
+        "花多少": ["花多少"],
+        "多久见效": ["多久見效", "多久见效"],
+        "验收指标": ["驗收指標", "验收指标"],
+        "可抄案例": ["可抄案例"],
+    }
+    hit = sum(1 for alts in labels.values() if any(a in text for a in alts))
+    if combo_marks or table_head:
+        form = "多段文字" if len(combo_marks) >= 3 else "表格"
         if not quiet:
-            print(f"  {OK} 打法組合表存在（{len(cols)} 列）")
-        if missing:
-            warnings.append(f"打法組合表可能缺列：{'、'.join(missing)}")
+            print(f"  {OK} 打法組合存在（{form}形式，{len(combo_marks)} 條，要素標籤 {hit}/7）")
+        if hit < 6:
+            if not quiet:
+                print(f"  {NG} 打法要素標籤只命中 {hit}/7")
+            hard_errors.append(
+                f"打法組合要素不全（{hit}/7）——每條須含：為什麼用它／具體動作／誰做＋花多少＋多久見效／驗收指標／可抄案例"
+            )
     else:
         if not quiet:
-            print(f"  {NG} 未找到「打法組合表」（表頭須含「為什麼用它」列）")
+            print(f"  {NG} 未找到打法組合（需「**打法 N｜名稱」分段，或含「為什麼用它」的表頭）")
         hard_errors.append(
-            "缺少《打法組合表》——須為：打法｜為什麼用它｜具體動作｜誰做｜花多少｜多久見效｜驗收指標｜可抄案例"
+            "缺少《打法組合》——推薦多段文字：每條「**打法 N｜名稱**」下寫"
+            "為什麼用它／具體動作／誰做｜花多少｜多久見效／驗收指標／可抄案例"
         )
 
     # 7b 問題類型 A–H 歸類 —— 警告

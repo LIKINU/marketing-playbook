@@ -234,11 +234,13 @@ def main():
     if combo:
         hdr = combo.group(0)
         cols = [c.strip() for c in hdr.strip("|").split("|")]
-        need = [c for c in ["打法", "具體動作", "具体动作", "誰做", "谁做"] if c not in hdr]
+        # ⚠️ 繁简任一命中即可（修正 2026-09-16：此前要求繁简全中，簡體稿永遠誤報缺列）
+        groups = {"打法": ["打法"], "具體動作": ["具體動作", "具体动作"], "誰做": ["誰做", "谁做"]}
+        missing = [name for name, alts in groups.items() if not any(a in hdr for a in alts)]
         if not quiet:
             print(f"  {OK} 打法組合表存在（{len(cols)} 列）")
-        if need:
-            warnings.append(f"打法組合表可能缺列：{'、'.join(need)}")
+        if missing:
+            warnings.append(f"打法組合表可能缺列：{'、'.join(missing)}")
     else:
         if not quiet:
             print(f"  {NG} 未找到「打法組合表」（表頭須含「為什麼用它」列）")
@@ -267,7 +269,7 @@ def main():
         warnings.append("風險自檢未掛「模式 NN」——請對照 04-失败归因总库.md 逐條標註（如「時機錯誤（模式 08）」）")
 
     # 7d 可抄案例引用 —— 警告
-    case_refs = re.findall(r"(?:case\s*\d+|cases/\d{2}[-–][^\s）)]*)", text)
+    case_refs = re.findall(r"(?:case\s*\d+|cases/\d{2})", text)
     if case_refs:
         if not quiet:
             print(f"  {OK} 已引用案例庫可抄案例（{len(case_refs)} 處）")

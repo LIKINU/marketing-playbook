@@ -271,8 +271,13 @@ def main():
     # 7d 可抄案例引用 —— 警告
     case_refs = re.findall(r"(?:case\s*\d+|cases/\d{2})", text)
     if case_refs:
+        # 2026-09-16：引用之外必須展開（別人怎麼做的）—— 只留卡片號＝不合格
+        expanded = re.search(r"(別人怎麼做|别人怎么做|他面對什麼|他面对什么|怎麼用|怎么用|具體做了什麼|具体做了什么)", text)
         if not quiet:
-            print(f"  {OK} 已引用案例庫可抄案例（{len(case_refs)} 處）")
+            print(f"  {OK} 已引用案例庫可抄案例（{len(case_refs)} 處）"
+                  + ("，且已展開成文字" if expanded else ""))
+        if not expanded:
+            warnings.append("可抄案例只有卡片號、未展開成文字 —— 須寫清「別人怎麼做的＋我們怎麼用」（用戶 2026-09-16 糾正）")
     else:
         if not quiet:
             print(f"  {WARN} 未引用案例庫可抄案例")

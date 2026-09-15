@@ -223,6 +223,59 @@ def main():
     elif not quiet:
         print(f"  {OK} 未發現預設禁用詞")
 
+    # 7) 核心方法論要素（2026-09-16 新增：把「好方案的三個特徵」變成機械校驗）
+    #    來源：用戶以《中百羅森新生開學引流方案》為基準的糾偏——該稿的診斷／打法組合／
+    #    風險自檢三章明顯優於同期產出，遂固化为硬門檻。
+    if not quiet:
+        print("\n【7】核心方法論要素（打法組合表／問題類型／失敗歸因編號／可抄案例）")
+
+    # 7a 打法組合表 —— 硬錯誤（這是本 skill 的核心產物）
+    combo = re.search(r"(?m)^\|[^\n]*(為什麼用它|为什么用它)[^\n]*\|", text)
+    if combo:
+        hdr = combo.group(0)
+        cols = [c.strip() for c in hdr.strip("|").split("|")]
+        need = [c for c in ["打法", "具體動作", "具体动作", "誰做", "谁做"] if c not in hdr]
+        if not quiet:
+            print(f"  {OK} 打法組合表存在（{len(cols)} 列）")
+        if need:
+            warnings.append(f"打法組合表可能缺列：{'、'.join(need)}")
+    else:
+        if not quiet:
+            print(f"  {NG} 未找到「打法組合表」（表頭須含「為什麼用它」列）")
+        hard_errors.append(
+            "缺少《打法組合表》——須為：打法｜為什麼用它｜具體動作｜誰做｜花多少｜多久見效｜驗收指標｜可抄案例"
+        )
+
+    # 7b 問題類型 A–H 歸類 —— 警告
+    mt = re.search(r"問題類型|问题类型", text)
+    if mt and re.search(r"[A-H]", text[mt.start():mt.start() + 100]):
+        if not quiet:
+            print(f"  {OK} 問題類型已歸類（A–H）")
+    else:
+        if not quiet:
+            print(f"  {WARN} 診斷未見「問題類型（A–H）」歸類")
+        warnings.append("診斷缺「問題類型（A–H）」——見 SKILL.md 第 2 步分類表（認知/交易/渠道/信任/復購/定價/組織/合規）")
+
+    # 7c 風險掛失敗歸因編號 —— 警告
+    modes = re.findall(r"模式\s*\d{1,2}", text)
+    if modes:
+        if not quiet:
+            print(f"  {OK} 風險已對照失敗歸因總庫（{'、'.join(sorted(set(modes))[:6])}）")
+    else:
+        if not quiet:
+            print(f"  {WARN} 風險未掛「模式 NN」編號")
+        warnings.append("風險自檢未掛「模式 NN」——請對照 04-失败归因总库.md 逐條標註（如「時機錯誤（模式 08）」）")
+
+    # 7d 可抄案例引用 —— 警告
+    case_refs = re.findall(r"(?:case\s*\d+|cases/\d{2}[-–][^\s）)]*)", text)
+    if case_refs:
+        if not quiet:
+            print(f"  {OK} 已引用案例庫可抄案例（{len(case_refs)} 處）")
+    else:
+        if not quiet:
+            print(f"  {WARN} 未引用案例庫可抄案例")
+        warnings.append("打法組合表建議加「可抄案例」列（引用 cases/01–49 的具體卡片）——611 張卡應被調用")
+
     # 結論
     print("\n" + "=" * 64)
     if hard_errors:

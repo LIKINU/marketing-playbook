@@ -132,9 +132,19 @@ python scripts/flow.py --dir 案子目錄      # 告訴你「現在第幾步、�
 ```bash
 python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5 \
     --internal skeleton.internal.md      # ← 施工说明/缺口/自检单，不进交付稿
-#  --tier  速览(=小客户/快速预览标准) | 标准 | 大赛 | B端 | G端 | 投标
+#  --tier  速览(=小客户/快速预览标准) | 标准(=C端品牌) | 大赛 | B端 | G端 | 投标
 #          不同档位给不同骨架；现有骨架即各类型客户（含小企业/大客户）的标准
 ```
+
+**六档各自一套「范式」**（骨架 ＋ 逐节填写指引 ＋ 关键句片段）：见 `references/12-范式库.md`。
+
+> 「每一个都需要有一个范式，例如B端的、C端的、小客户的，
+> 都需要有他们各自的一个范式，**不仅只有大纲，也需要有里面的内容可以参考**。」
+> → **范式 ≠ 模板**：模板只给空表；范式连「这一节写什么算合格、写几句、必须含哪几个数」
+> 一起给，再附可直接改写套用的句片段。
+> → `composer --internal` 会把**本档**的逐节指引一并写进内部文件（**不进交付稿**）。
+> → 骨架的唯一真相在 `composer.py`，指引在 `scripts/paradigm_data.py`，
+> 由 `scripts/build_paradigm.py` 拼装 —— 拼装前先做一致性校验，不一致就退出 1。
 
 它做什麼（**確定性，非模型生成**）：
 1. 解析 `references/00-打法库.md` 全部 §X.Y 打法
@@ -227,7 +237,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：第 -1 步導航 + 門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
-| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `knowledge_map.json`（映射表）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `build_paradigm.py`（六檔範式庫生成·拼裝前先驗骨架一致性）＋ `knowledge_map.json`（映射表）＋ `paradigm_data.py`（逐節填寫指引）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
 | `references/08-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
@@ -242,6 +252,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | `references/06-选流派矩阵与对照表.md` | 判斷外包還是自己幹 | 要決定分工邊界時 |
 | `references/07-质量范式-便利店开学季案.md` | ⭐ **質量標尺**：角色產出規格／骨架模板／可校驗指標 | 不確定「寫到什麼程度算夠」時 |
 | `references/范例/` | 📄 **樣張（簡體）**：`-交付稿.md/.docx`、`-原版.md`、`-任务规则表.json`、`-预算表.json` | 想看成品／輸入文件長什麼樣時 |
+| ⭐ `references/12-范式库.md` | **六檔範式（骨架＋逐節填寫指引＋關鍵句片段）**：速覽（小客戶）／標準（C 端品牌）／大賽／B 端／G 端／投標，共 169 節、3.4 萬字 | 動手填骨架前，想知道「這一節寫什麼算合格」時 |
 | ~~`references/archive/`~~ | **已退役（2026-09-16）**：內容併入 `cases/46-50` | — |
 
 ---

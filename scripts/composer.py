@@ -28,6 +28,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paradigm_data as _PD   # noqa: E402  范式库（六档骨架指引，见 build_paradigm.py）
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REF = os.path.join(HERE, "..", "references")
 PLAYBOOK = os.path.join(REF, "00-打法库.md")
@@ -153,11 +156,22 @@ def select_plays(plays, gate, kmap, top, cardpoints):
     s11_names = {p["name"] for p in plays if p.get("major") == 11}
 
     # ① 匹配路由规则 → 方向关键词（round-robin 交錯，保證從不同狀況各取一條）
-    matched = [r for r in kmap.get("路由规则", [])
-               if any(k in client for k in r["kw"])]
+    all_rules = kmap.get("路由规则", [])
+    hits = {id(r): [k for k in r["kw"] if k in client] for r in all_rules}
+    matched = [r for r in all_rules if hits[id(r)]]
     # ①a 場景優先：若客戶狀況命中了「特殊場景」規則（方向含 §11 打法，如 B端／投標／G端），
     #     就只用這些場景規則的方向，避免被通用規則稀釋（否則 B 端客戶只拿到 2／4 條 B 端打法）。
-    special = [r for r in matched if any(d in s11_names for d in r["方向"])]
+    #     ⚠️ 但必須是**強信號**：同一條規則至少命中 2 個關鍵詞才算。
+    #        2026-09-17 實測踩到的坑：某 C 端美妝品牌案的客戶狀況裡出現了一個孤立的「B2B」字樣，
+    #        就讓 B 端規則單詞命中 → 場景優先生效 → 把「門店／線上／復購／造節」四條正確規則全擠掉，
+    #        選出來的 5 條打法有 4 條是 B 端商務條款那類。**單一弱詞不得改寫整個客戶的場景判定。**
+    #     → 因此：① 弱命中（<2 詞）的 §11 規則**整條丟棄**（不進 buckets）；
+    #              ② 有強命中的 §11 規則時，只用這些規則（避免被通用規則稀釋）。
+    def _is_scene_rule(r):
+        return any(d in s11_names for d in r["方向"])
+
+    special = [r for r in matched if _is_scene_rule(r) and len(hits[id(r)]) >= 2]
+    matched = [r for r in matched if not _is_scene_rule(r) or r in special]
     if special:
         matched = special
     buckets = [list(r["方向"]) for r in matched]
@@ -185,10 +199,14 @@ def select_plays(plays, gate, kmap, top, cardpoints):
         _take(cand)
 
     # ② 不足則用 bigram 重疊補位（並含卡點章節加成）
+    #     ⚠️ §11 特殊場景打法（B端／投標／G端）**只在上面 explicit 場景路由時才進**，
+    #        不得靠 bigram 相似度「順手撈」進來 —— 否則一個 C 端美妝案會莫名其妙長出
+    #        「生意拆解／單位經濟模型」這種 B 端章節，客戶一看就知道不是給他寫的。
     if len(picked) < top:
         boost = [m for c in cardpoints for m in kmap["cardpoint_to_major"].get(c, [])]
+        pool = plays if special else [p for p in plays if p.get("major") != 11]
         scored = sorted(
-            plays,
+            pool,
             key=lambda p: -(len(bigrams(p["name"] + p["situation"] + p.get("howto", "")) & cb)
                             + (3 if p["major"] in boost else 0)),
         )
@@ -854,9 +872,9 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     #   → 改寫進 internal 文件（見 `build_internal`），交付稿只留客戶要看的內容。
     # 场景章节：大赛／B端／G端／投标 各自有必须有的章节（缺一块＝不完整）
     # 不同档位给不同骨架：--tier 直接等于场景名时，自动注入该场景专属章节。
-    _TIER_SCENE = {"大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}
+    _TIER_SCENE = {"标准": "标准", "大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}
     if not scene:
-        scene = _TIER_SCENE.get(tier, "B端")
+        scene = _TIER_SCENE.get(tier, "标准")
     body = (head + diagnosis + strategy + positioning + reach + copy_ + kpi
             + budget + exec_ + scene_body(scene, client))
     return body
@@ -869,6 +887,31 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
 #       章节清单与评分标准见 `references/09-完整策划标准与评分表.md`。
 # ─────────────────────────────────────────────────────────────
 SCENE_SECTIONS = {
+    # 2026-09-17 新增：C 端品牌（＝「标准」档）。用户原话：「例如B端的、C端的、小客户的，
+    #   都需要有他们各自的一个范式」—— 原本「标准」档无场景，会 fallback 到 B 端场景章
+    #   （生意拆解／单位经济／商务条款），对消费品牌是错配。这里补上 C 端专属四章。
+    "标准": (
+        "## 九 · 产品与货盘结构（卖什么组合，比怎么推广更先决定成败）\n"
+        "| 产品／SKU | 在货盘里的角色 | 价格带 | 毛利 | 承担什么任务 |\n|---|---|---|---|---|\n"
+        "| {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "- **价格带阶梯**：{FILL} 元 → {FILL} 元 → {FILL} 元（对应三种决策路径：试试看／认真买／囤货）\n"
+        "- **组货逻辑一句话**：{FILL}\n\n"
+        "## 十 · 内容与种草矩阵（谁来说／在哪说／说什么）\n"
+        "- **核心母题**（只留一个，其余全部让位）：{FILL}\n"
+        "| 内容类型 | 说什么 | 谁来说 | 发在哪 | 频次 |\n|---|---|---|---|---|\n"
+        "| 科普 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 体验 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 趣味 | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "## 十一 · 会员与复购机制（拉新之后怎么留下）\n"
+        "- **留存节奏**：购买后第 {FILL} 天／第 {FILL} 天／第 {FILL} 天各触达一次，内容分别是 {FILL}\n"
+        "- **复购触发条件**：{FILL}（用完／某时点／某行为）\n"
+        "- **会员权益**（写清给什么、成本多少）：{FILL}\n"
+        "- **沉默唤醒**：超过 {FILL} 天未复购的动作：{FILL}\n\n"
+        "## 十二 · 渠道价格与控价（不写这节，活动一开就乱价）\n"
+        "- **各渠道价格带**：线上 {FILL}／线下 {FILL}／私域 {FILL}；差异来自 {FILL}（赠品／服务／规格），不是直接降价\n"
+        "- **控价规则**：低于 {FILL} 元销售的处理流程：{FILL}\n"
+        "- **促销机制边界**（什么折扣不能给）：{FILL}\n\n"
+    ),
     "大赛": (
         "## 九 · 创意设计执行（大赛必写，只有概念没有样稿＝失分）\n"
         "- **Big Idea（一句话，能被别人复述）**：{FILL}\n"
@@ -1063,6 +1106,29 @@ def build_internal(rules, plays, kmap, ind, tier, today):
     lines.append("| # | 自检项 | 结果 |\n|---|---|---|\n")
     for n, r in enumerate(SELFCHECK_ROWS, 1):
         lines.append(f"| {n} | {r} | 【填】 |\n")
+
+    # 2026-09-17：范式库（六档骨架＋逐节指引）。用户原话「每一个都需要有一个范式…
+    #   不仅只有大纲，也需要有里面的内容可以参考」。
+    #   ⚠️ 指引只出现在这份**内部文件**里 —— 交付稿必须保持干净（selfcheck 第【10】关）。
+    lines.append("\n## 六、本档填写指引（范式库 · 逐节）\n")
+    lines.append(f"> 档位 `{tier}` 的骨架共 {len(_PD.SKELETON_HEADS.get(tier, []))} 节，"
+                 f"逐节指引如下。完整版（含全部六档）见 `references/12-范式库.md`。\n")
+    lines.append(f"> ⛔ 这些是**给你看的**：照它填 `【填】`，但**一个字都不要抄进交付稿**。\n\n")
+    _miss = 0
+    for _h, _g in _PD.guides_for_tier(tier):
+        lines.append(f"**{_h}**\n")
+        if not _g:
+            _miss += 1
+            lines.append("- ⚠️ 本节暂无指引（范式库缺口）\n")
+            continue
+        lines.append(f"- 该写什么：{_g['what']}\n")
+        lines.append(f"- 写几句：{_g['size']}\n")
+        lines.append(f"- 必须含：{_g['must']}\n")
+        for _x in (_g.get("lines") or []):
+            lines.append(f"  - 句片段：{_x}\n")
+        lines.append("\n")
+    if _miss:
+        lines.append(f"\n> ⚠️ 本档有 {_miss} 节缺指引，请补 `scripts/paradigm_data.py`。\n")
     return "\n".join(lines)
 
 
@@ -1086,9 +1152,9 @@ def main():
                          "标准=完整八章＋B端场景章；大赛／B端／G端／投标=完整八章＋该场景专属章节。"
                          "即「不同档位给不同骨架」，现有骨架本身即各类型客户（含小企业／大客户）的标准。")
     ap.add_argument("--top", type=int, default=5)
-    ap.add_argument("--scene", default="", choices=["大赛", "B端", "G端", "投标"],
-                    help="交付场景章（大赛／B端商业／G端政府／投标）。一般随 --tier 自动推断；"
-                         "仅在 --tier 为 速览／标准 时用来手动覆盖场景章。")
+    ap.add_argument("--scene", default="", choices=["标准", "大赛", "B端", "G端", "投标"],
+                    help="交付场景章（标准=C端品牌／大赛／B端商业／G端政府／投标）。"
+                         "一般随 --tier 自动推断；仅在 --tier 为 速览 时用来手动覆盖场景章。")
     ap.add_argument("--internal", default="",
                     help="額外輸出「內部施工說明」到這個路徑（施工要求／知識庫缺口／"
                          "打法溯源／自檢單）。**這份不進交付稿**，只給執行 AI 與維護者看。")
@@ -1135,7 +1201,7 @@ def main():
         print(f"{WARN} 未指定 --internal：施工说明／知识库缺口／自检单**没有落盘**"
               f"（建议补 `--internal <路径>`，执行 AI 才知道要补什么）")
 
-    _sc = a.scene or {"大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}.get(a.tier, "B端")
+    _sc = a.scene or {"标准": "标准", "大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}.get(a.tier, "标准")
     print(f"   档位：{a.tier} ｜ 场景：{_sc} ｜ 识别卡点：{'／'.join(cardpoints)} ｜ 注入打法 {len(picked)} 条")
     for i, p in enumerate(picked):
         print(f"   {i+1}. {_t2s_light(p['name'])}")

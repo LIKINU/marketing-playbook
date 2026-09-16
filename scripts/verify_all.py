@@ -85,7 +85,17 @@ def repo_hash():
 def stage_a(quiet):
     """A 介面：每支腳本 --help 都能跑"""
     bad = []
-    scripts = sorted(f for f in os.listdir(HERE) if f.endswith(".py"))
+    # 只測「有 CLI 入口」的腳本：純資料／純函式庫模組（沒有 __main__）不該被當成工具測 ——
+    # 對它跑 --help 只會安靜地 import 一遍就退出 0，看起來「通過」其實什麼都沒驗到。
+    scripts = []
+    for f in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
+        try:
+            with open(os.path.join(HERE, f), encoding="utf-8") as fh:
+                if '__name__ == "__main__"' not in fh.read():
+                    continue
+        except OSError:
+            pass
+        scripts.append(f)
     for s in scripts:
         rc, out = sh([PY, os.path.join(HERE, s), "--help"], timeout=60)
         # argparse 正常回 0；有些腳本沒有 --help 會回 2 —— 只要不是 traceback 就算介面可用

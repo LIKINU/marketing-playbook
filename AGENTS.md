@@ -122,7 +122,8 @@ python scripts/flow.py --dir 案子目錄      # 告訴你「現在第幾步、�
 ```bash
 python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5 \
     --internal skeleton.internal.md      # ← 施工说明/缺口/自检单，不进交付稿
-#  --tier  速览 | 标准 | G端
+#  --tier  速览(=小客户/快速预览标准) | 标准 | 大赛 | B端 | G端 | 投标
+#          不同档位给不同骨架；现有骨架即各类型客户（含小企业/大客户）的标准
 ```
 
 它做什麼（**確定性，非模型生成**）：

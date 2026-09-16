@@ -539,6 +539,57 @@ def main():
         if not quiet:
             print(f"  {OK} 無內部座標（客戶可直接閱讀／提交）")
 
+    # 11) 場景完整性（2026-09-17 新增）
+    #     大賽／B端／G端／投標 各自有「必須有的章節」（見 references/09 + composer SCENE_SECTIONS）。
+    #     缺一塊＝不完整（「寫得再好，缺一塊就是不完整的」）。
+    #     觸發條件：正文出現「## 九 ·」場景章節標題 → 判定用了場景結構 → 必須補齊該場景後續章節。
+    #     判定：場景可識別且核心章節缺失 → 硬錯誤（退出碼 1，不得交付）；
+    #           未用場景結構（無「九」章節）或「九」標題無法識別場景 → 只警告，不攔。
+    #     ⚠️ 比對字串用**簡體**（交付稿依【9】必須是簡體）；註解用繁體與本檔一致。
+    if not quiet:
+        print("\n【11】場景完整性（大賽／B端／G端／投標 各自必須有的章節）")
+    _scene_detect = [
+        ("大賽", "创意设计执行"),
+        ("B端", "生意拆解与机会量化"),
+        ("G端", "政策依据与上位规划"),
+        ("投標", "商务响应偏离表"),
+    ]
+    _scene_req = {
+        "大賽": ["创意设计执行", "媒介排期表", "提案脚本", "评委问答预判"],
+        "B端": ["生意拆解与机会量化", "财务测算与盈亏平衡", "组织与人力可行性", "商务条款"],
+        "G端": ["政策依据与上位规划", "绩效目标与考核", "资金与保障", "汇报与评审", "合规与舆情红线"],
+        "投標": ["商务响应偏离表", "需求理解", "实施与保障", "业绩与售后", "报价与资质"],
+    }
+    m9 = re.search(r"(?m)^##\s*九\s*[·・.\s]*(.+?)(?=^##\s|\Z)", body, flags=re.S)
+    _detected = None
+    if m9:
+        head9 = m9.group(1)
+        for sc, kw in _scene_detect:
+            if kw in head9:
+                _detected = sc
+                break
+    if _detected:
+        req = _scene_req[_detected]
+        missing = [c for c in req if c not in body]
+        if not quiet:
+            print(f"  {OK if not missing else NG} 識別為「{_detected}」場景；"
+                  f"應有 {len(req)} 個場景章節，缺失 {len(missing)} 個"
+                  + (f"：{'、'.join(missing)}" if missing else "（齊全）"))
+        if missing:
+            hard_errors.append(
+                f"「{_detected}」場景缺失核心章節：{'、'.join(missing)}"
+                f"—— 見 references/09-完整策劃標準與評分表.md 該場景的必寫章節清單"
+                f"（composer --scene {_detected} 會自動注入）"
+            )
+    elif m9:
+        if not quiet:
+            print(f"  {WARN} 出現「九 ·」章節但無法識別場景（標題：{m9.group(1)[:28]}…），跳過場景校驗")
+        warnings.append("「九 ·」章節標題無法識別場景類型（應為 创意设计执行／生意拆解／政策依据／商务响应偏离表 之一），未做場景完整性校驗")
+    else:
+        if not quiet:
+            print(f"  {WARN} 未使用場景結構（無「九 ·」章節）—— 若為大賽／B端／G端／投標 交付，須補場景章節")
+        warnings.append("未檢測到場景章節（## 九 ·）。若本案為大賽／B端／G端／投標 交付，需補該場景必有的章節（見 references/09-完整策劃標準與評分表.md）")
+
     # 結論
     print("\n" + "=" * 64)
     if hard_errors:

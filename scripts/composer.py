@@ -12,7 +12,7 @@ composer.py — 方案组装器（marketing-playbook 的「真·skill」引擎�
 
 用法：
     python composer.py --rules rules.json --out skeleton.md
-    python composer.py --rules rules.json --out skeleton.md --tier 速覽|標準|G端 --top 5
+    python composer.py --rules rules.json --out skeleton.md --tier 速覽|標準|大賽|B端|G端|投標 --top 5
 
 輸入：門禁《任務規則表》JSON（gate_check.py 用的那份）
 輸出：方案骨架 .md（打法／理論依據／可抄案例已注入；`【填】` 處待模型補）
@@ -149,9 +149,17 @@ def select_plays(plays, gate, kmap, top, cardpoints):
     cb = bigrams(client)
     name_index = {p["name"]: p for p in plays}
 
+    # §11 特殊場景打法（B端／投標／G端）的名稱集合 —— 用它來判斷一條路由規則是否「場景專用」
+    s11_names = {p["name"] for p in plays if p.get("major") == 11}
+
     # ① 匹配路由规则 → 方向关键词（round-robin 交錯，保證從不同狀況各取一條）
     matched = [r for r in kmap.get("路由规则", [])
                if any(k in client for k in r["kw"])]
+    # ①a 場景優先：若客戶狀況命中了「特殊場景」規則（方向含 §11 打法，如 B端／投標／G端），
+    #     就只用這些場景規則的方向，避免被通用規則稀釋（否則 B 端客戶只拿到 2／4 條 B 端打法）。
+    special = [r for r in matched if any(d in s11_names for d in r["方向"])]
+    if special:
+        matched = special
     buckets = [list(r["方向"]) for r in matched]
     direction, i = [], 0
     while any(len(b) > i for b in buckets):
@@ -190,8 +198,13 @@ def select_plays(plays, gate, kmap, top, cardpoints):
             _take(p)
 
     # ③ 多樣性：每章最多 2 條（超出往後遞補，最後若不足則放寬）
+    #     ⚠️ §11 特殊場景打法（major == 11）豁免：場景章節本就要求「這類交付必須全收」，
+    #        若按「每章最多 2 條」限制，B 端客戶只會拿到 2／4 條打法，場景骨架就不完整了。
     final, per = [], {}
     for p in picked:
+        if p["major"] == 11:
+            final.append(p)
+            continue
         if per.get(p["major"], 0) >= 2:
             continue
         final.append(p)
@@ -758,7 +771,7 @@ def build_lite(rules, plays, kmap, cardpoints, today):
     return "\n".join(lines)
 
 
-def build_skeleton(rules, plays, kmap, tier, cardpoints):
+def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     client = rules.get("client", "客户")
     gate = rules.get("gate", {})
     today = datetime.date.today().isoformat()
@@ -836,26 +849,148 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
         f"### 8.6 不承诺的事\n{FILL}\n\n"
     )
 
-    # ── G端专章 ──
-    g_extra = ""
-    if tier == "G端":
-        g_extra = (
-            "## 九 · 政策依据与项目背景（G端必写）\n"
-            "- 政策依据（上位规划／文件号／条款）：【填】\n- 项目背景与必要性：【填】\n"
-            "- 与上级规划的对应关系：【填】\n- 资金来源与预算合规：【填】\n\n"
-            "## 十 · 汇报与评审\n### 10.1 汇报稿/PPT 骨架\n"
-            "- 封面／背景／目标／方案／预算／进度／预期成效／保障措施：【填】\n\n"
-            "### 10.2 评审答疑口径（预判评委问题＋标准答法）\n【填】\n\n"
-            "## 十一 · 合规与舆情红线\n"
-            "- 公文格式与字数【规范】：符合公文排版/章节/字数/页数要求\n"
-            "- 广告法与平台政策红线：【填】\n- 舆情风险清单与应对：【填】\n\n"
-        )
-
     # 2026-09-17：原「附件 · 交付自检单」整章移出交付稿 —— 自檢單是**內部質檢記錄**，
     #   按協定它就該原樣輸出在 AI 的**回覆中**給用戶看，而不是印在客戶方案的最後一頁。
     #   → 改寫進 internal 文件（見 `build_internal`），交付稿只留客戶要看的內容。
-    body = head + diagnosis + strategy + positioning + reach + copy_ + kpi + budget + exec_ + g_extra
+    # 场景章节：大赛／B端／G端／投标 各自有必须有的章节（缺一块＝不完整）
+    # 不同档位给不同骨架：--tier 直接等于场景名时，自动注入该场景专属章节。
+    _TIER_SCENE = {"大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}
+    if not scene:
+        scene = _TIER_SCENE.get(tier, "B端")
+    body = (head + diagnosis + strategy + positioning + reach + copy_ + kpi
+            + budget + exec_ + scene_body(scene, client))
     return body
+
+
+# ─────────────────────────────────────────────────────────────
+# 5a. 场景章节（2026-09-17 新增）
+#     用户：「这个框架的内容种类都太少了，根本就不是一个完整的策划」。
+#     → 四类交付场景各自有**必须有的章节**，缺一块就是不完整。
+#       章节清单与评分标准见 `references/09-完整策划标准与评分表.md`。
+# ─────────────────────────────────────────────────────────────
+SCENE_SECTIONS = {
+    "大赛": (
+        "## 九 · 创意设计执行（大赛必写，只有概念没有样稿＝失分）\n"
+        "- **Big Idea（一句话，能被别人复述）**：{FILL}\n"
+        "- **主视觉与文案样稿**：{FILL}（把文案写出来，不是描述长什么样）\n"
+        "- **物料清单与样稿**（海报／短视频／H5／线下）：\n"
+        "  - 海报主文案：{FILL}\n"
+        "  - 短视频脚本（15 秒，分镜）：{FILL}\n"
+        "  - 线下物料：{FILL}\n"
+        "- **创意如何支撑策略**（不是好看，是解决问题）：{FILL}\n\n"
+        "## 十 · 媒介排期表（哪天发什么，不是只写渠道名）\n"
+        "| 阶段 | 日期 | 渠道 | 内容 | 频次 | 负责人 |\n|---|---|---|---|---|---|\n"
+        "| 预热 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 引爆 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 承接 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "## 十一 · 提案脚本（现场提案 8 分钟）\n"
+        "| 时间 | 讲什么 | 对应页 |\n|---|---|---|\n"
+        "| 0:00–0:40 | 一句话结论（我们建议做什么、预期得到什么） | {FILL} |\n"
+        "| 0:40–2:30 | 为什么是这个卡点（数据＋排除其他解释） | {FILL} |\n"
+        "| 2:30–5:00 | 核心策略与打法（挑最强的 2–3 条深讲） | {FILL} |\n"
+        "| 5:00–7:00 | 创意与执行（亮样稿） | {FILL} |\n"
+        "| 7:00–8:00 | 预算与预期效果（收尾回到结论） | {FILL} |\n\n"
+        "## 十二 · 评委问答预判（10 个最可能被问的）\n"
+        "| # | 预判问题 | 标准答法 |\n|---|---|---|\n"
+        "| 1 | 为什么选这个人群／这个方向？ | {FILL} |\n"
+        "| 2 | 预算为什么这么分？ | {FILL} |\n"
+        "| 3 | 效果怎么衡量？数据从哪来？ | {FILL} |\n"
+        "| 4 | 竞品已经在做了，你们有什么不同？ | {FILL} |\n"
+        "| 5 | {FILL} | {FILL} |\n\n"
+        "## 附件 · 一手调研材料（官方要求「调查表附后」）\n"
+        "- 调查问卷原件：{FILL}\n- 访谈／走访记录：{FILL}\n"
+        "- 数据来源清单（来源／口径／时点）：{FILL}\n- 物料完稿：{FILL}\n\n"
+    ),
+    "B端": (
+        "## 九 · 生意拆解与机会量化\n"
+        "> 营收 ＝ 流量 × 转化率 × 客单价 × 复购次数 —— 先拆开，才知道钱漏在哪一层。\n\n"
+        "| 因子 | 当前值 | 目标值 | 差距 | 造成差距的主因 | 主要动作 |\n|---|---|---|---|---|---|\n"
+        "| 流量 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 转化率 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 客单价 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 复购次数 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "**最大缺口在哪一层**：{FILL}（一层只选一个，选差距 × 可达性最高的那层）\n\n"
+        "## 十 · 财务测算与盈亏平衡（B 端必答，答不上＝拿不到预算）\n"
+        "- **投入明细**（一次性／周期性分开列）：\n"
+        "  - 一次性：{FILL}\n  - 周期性（月）：{FILL}\n"
+        "- **单位经济模型**：单客获取成本 {FILL} 元；单客生命周期价值 {FILL} 元；"
+        "回本周期 {FILL}\n"
+        "- **盈亏平衡**：需要做到 {FILL} 单／{FILL} 客流才能打平；按当前节奏需要 {FILL} 个月\n"
+        "- **敏感性分析**（三档）：\n"
+        "| 情景 | 关键假设 | 营收 | 成本 | 结论 |\n|---|---|---|---|---|\n"
+        "| 乐观 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 基准 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "| 悲观 | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "## 十一 · 组织与人力可行性（做不完的方案＝没有方案）\n"
+        "| 动作 | 需要谁 | 每周投入 | 现有资源够吗 | 缺口怎么补 |\n|---|---|---|---|---|\n"
+        "| {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "## 十二 · 商务条款\n"
+        "- 报价与付款节奏：{FILL}\n- 交付物清单与验收标准：{FILL}\n"
+        "- 知识产权归属：{FILL}\n- 违约责任与退出机制：{FILL}\n\n"
+    ),
+    "G端": (
+        "## 九 · 政策依据与上位规划（G 端第一关，没有依据＝直接出局）\n"
+        "- **国家层面**：{FILL}（文件名称＋文号＋具体条款）\n"
+        "- **省级层面**：{FILL}（文件名称＋文号＋具体条款）\n"
+        "- **市级／县级层面**：{FILL}（文件名称＋文号＋具体条款）\n"
+        "- **本项目与上位规划的对应关系**：{FILL}\n"
+        "- **必要性**：不做会怎样（用数据说明）：{FILL}\n\n"
+        "## 十 · 绩效目标与考核（G 端核心，不可考核＝立不了项）\n"
+        "| 一级指标 | 二级指标 | 三级指标 | 目标值 | 考核方式 | 责任单位 |\n|---|---|---|---|---|---|\n"
+        "| {FILL} | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "## 十一 · 资金与保障\n"
+        "- **总投资**：{FILL} 万元；**资金来源**：财政 {FILL}／专项债 {FILL}／社会资本 {FILL}\n"
+        "- **分年度用款计划**：第一年 {FILL}；第二年 {FILL}；第三年 {FILL}\n"
+        "- **资金管理办法**：{FILL}\n"
+        "- **组织保障**：领导小组 {FILL}；牵头单位 {FILL}；配合单位 {FILL}\n"
+        "- **督导与考核机制**：{FILL}\n\n"
+        "## 十二 · 汇报与评审\n"
+        "### 12.1 汇报稿／PPT 骨架\n"
+        "- 封面／背景／依据／目标／任务／实施／预算／绩效／保障 逐页：{FILL}\n\n"
+        "### 12.2 评审答疑口径\n"
+        "| # | 预判问题 | 标准答法 |\n|---|---|---|\n"
+        "| 1 | 政策依据充分吗？ | {FILL} |\n"
+        "| 2 | 资金从哪来、合规吗？ | {FILL} |\n"
+        "| 3 | 绩效目标怎么考核？ | {FILL} |\n\n"
+        "## 十三 · 合规与舆情红线\n"
+        "- 公文格式与字数页数：{FILL}\n- 禁用词与红线：{FILL}\n"
+        "- 舆情风险清单与应对：{FILL}\n\n"
+    ),
+    "投标": (
+        "## 九 · 商务响应偏离表（投标第一优先，格式不符＝废标）\n"
+        "> 逐条对照招标要求写「完全响应／正偏离／负偏离」。**先把符合性审查表过一遍再谈创意。**\n\n"
+        "| 序号 | 招标要求 | 我方响应 | 偏离说明 |\n|---|---|---|---|\n"
+        "| 1 | {FILL} | 完全响应 | {FILL} |\n"
+        "| 2 | {FILL} | 正偏离 | {FILL} |\n\n"
+        "## 十 · 需求理解（很多标输在这一步 —— 证明你听懂了）\n"
+        "- **招标方要解决的核心问题**：{FILL}\n"
+        "- **我方理解**（用自己的话复述需求，不照抄）：{FILL}\n"
+        "- **关键约束**（预算／周期／合规／既有系统）：{FILL}\n"
+        "- **我方的差异化理解**（别人可能忽略的点）：{FILL}\n\n"
+        "## 十一 · 实施与保障\n"
+        "- **项目组配置**（角色／资历／投入比例）：{FILL}\n"
+        "- **进度计划**（里程碑＋交付物）：{FILL}\n"
+        "- **质量保障机制**：{FILL}\n- **交付物清单**：{FILL}\n\n"
+        "## 十二 · 业绩与售后\n"
+        "| 项目名 | 业主 | 金额 | 时间 | 验收情况 |\n|---|---|---|---|---|\n"
+        "| {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
+        "- **售后承诺**（响应时效／服务内容）：{FILL}\n- **培训计划**：{FILL}\n\n"
+        "## 十三 · 报价与资质\n"
+        "| 分项 | 数量 | 单价 | 小计 |\n|---|---|---|---|\n"
+        "| {FILL} | {FILL} | {FILL} | {FILL} |\n| — | **合计** | — | **{FILL}** |\n\n"
+        "- **资质文件清单**（营业执照／资质证书／财务报表／无重大违法声明）：{FILL}\n\n"
+    ),
+}
+
+
+def scene_body(scene, client=""):
+    """按交付场景返回「这一类方案必须有的章节」。
+
+    没有这些章节，方案就是**不完整**的 —— 跟打法写得好不好无关。
+    """
+    # ⚠️ SCENE_SECTIONS 是普通字串（不是 f-string），`{FILL}` 是**字面佔位符**，
+    #    必須在這裡換成真的 `【填】` —— 否則交付稿裡會出現 `{FILL}` 這種鬼東西。
+    return SCENE_SECTIONS.get(scene, SCENE_SECTIONS["B端"]).replace("{FILL}", FILL)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -945,8 +1080,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rules", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--tier", default="标准", choices=["速览", "标准", "G端"])
+    ap.add_argument("--tier", default="标准",
+                    choices=["速览", "标准", "大赛", "B端", "G端", "投标"],
+                    help="交付档位＝骨架形态：速览=轻量快览（1–2 页，只留决策要素，可快速阅览）＝小客户／快速预览标准；"
+                         "标准=完整八章＋B端场景章；大赛／B端／G端／投标=完整八章＋该场景专属章节。"
+                         "即「不同档位给不同骨架」，现有骨架本身即各类型客户（含小企业／大客户）的标准。")
     ap.add_argument("--top", type=int, default=5)
+    ap.add_argument("--scene", default="", choices=["大赛", "B端", "G端", "投标"],
+                    help="交付场景章（大赛／B端商业／G端政府／投标）。一般随 --tier 自动推断；"
+                         "仅在 --tier 为 速览／标准 时用来手动覆盖场景章。")
     ap.add_argument("--internal", default="",
                     help="額外輸出「內部施工說明」到這個路徑（施工要求／知識庫缺口／"
                          "打法溯源／自檢單）。**這份不進交付稿**，只給執行 AI 與維護者看。")
@@ -980,7 +1122,7 @@ def main():
 
     cardpoints = infer_cardpoints(gate)
     picked = select_plays(plays, rules.get("gate", {}), kmap, a.top, cardpoints)
-    md = build_skeleton(rules, picked, kmap, a.tier, cardpoints)
+    md = build_skeleton(rules, picked, kmap, a.tier, cardpoints, a.scene)
     _dump(a.out, md)
     print(f"✅ 已生成骨架（交付稿用）：{a.out}")
 
@@ -993,7 +1135,8 @@ def main():
         print(f"{WARN} 未指定 --internal：施工说明／知识库缺口／自检单**没有落盘**"
               f"（建议补 `--internal <路径>`，执行 AI 才知道要补什么）")
 
-    print(f"   档位：{a.tier} ｜ 识别卡点：{'／'.join(cardpoints)} ｜ 注入打法 {len(picked)} 条")
+    _sc = a.scene or {"大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}.get(a.tier, "B端")
+    print(f"   档位：{a.tier} ｜ 场景：{_sc} ｜ 识别卡点：{'／'.join(cardpoints)} ｜ 注入打法 {len(picked)} 条")
     for i, p in enumerate(picked):
         print(f"   {i+1}. {_t2s_light(p['name'])}")
     print("   → 下一步：模型只填【填】处；再跑 run_pipeline 出稿。")

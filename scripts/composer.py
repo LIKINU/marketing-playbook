@@ -240,13 +240,151 @@ def model_label(code):
 
 
 _M03_RE = {}
+_M03_BRIEF = {}      # code → 「解決什麼問題」原文
+_M03_STEPS = {}      # code → [「做什麼」, …]
+_CARDS = {}          # cases 檔名 → [ {brand, one, what, result, points} … ]
 
 
 def load_model_names(path):
     if not os.path.exists(path):
         return
-    for mm in re.finditer(r"^###\s*([A-Ma-m]\d{1,2})[｜|·\s]+([^\n（(]+)", read(path), flags=re.M):
+    t = read(path)
+    for mm in re.finditer(r"^###\s*([A-Ma-m]\d{1,2})[｜|·\s]+([^\n（(]+)", t, flags=re.M):
         _M03_RE[mm.group(1).upper()] = mm.group(2).strip()
+
+    # ── 2026-09-17：連「內容」一起讀（原本只讀到名字，骨架裡只剩編號 → 用戶投訴：
+    #    「單純寫一個文字…根本沒有辦法讓 Agent 理解並完整讀取」）。
+    #    → 讀 ① 解決什麼問題（一句）＋ ② 怎麼用 表格裡的「做什麼」欄（前 3 步）。
+    blocks = re.split(r"(?m)^###\s*", t)[1:]
+    for b in blocks:
+        m = re.match(r"([A-Ma-m]\d{1,2})[｜|\s]", b)
+        if not m:
+            continue
+        code = m.group(1).upper()
+        mo = re.search(r"\*\*①\s*解決什麼問題\*\*\s*\n+(.+?)(?:\n\s*\n|\n\*\*)", b, flags=re.S)
+        if mo:
+            _M03_BRIEF[code] = re.sub(r"\s+", " ", mo.group(1)).strip()
+        mt = re.search(r"\*\*②\s*怎麼用.*?\*\*\s*\n(.*?)(?:\n\s*\*\*|\Z)", b, flags=re.S)
+        if mt:
+            steps = [re.sub(r"\s+", " ", r[1]).strip()
+                     for r in re.findall(r"(?m)^\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|", mt.group(1))]
+            _M03_STEPS[code] = [s for s in steps if s]
+
+
+def model_brief(code, nsteps=3):
+    """把『模型名（03 §C1）』升級成『模型名（03 §C1）—— 解決 X；第 1–3 步：…』"""
+    name = _M03_RE.get(code, "")
+    head = f"{name}（03 §{code}）" if name else f"（03 §{code}）"
+    prob = _M03_BRIEF.get(code, "")
+    steps = _M03_STEPS.get(code, [])[:nsteps]
+    if not prob and not steps:
+        return head
+    out = head
+    if prob:
+        out += f" —— 解決「{prob[:80]}」"
+    if steps:
+        out += "；前幾步：" + " → ".join(s[:28] for s in steps)
+    return out
+
+
+# ─────────────────────────────────────────────────────────────
+# 案例卡讀取（2026-09-17 新增）
+#    原本骨架的「可抄案例」只寫 `来源 cases/01-xxx.md，请展开…` —— 是**占位符**。
+#    這裡把案例卡的真實內容抽出來，讓骨架本身就帶著證據。
+#    兼容兩種案例清單格式：① 表格（`| # | 案例 | 一句話 | 最硬的一個數字 |`）
+#                          ② 條列（`**1｜品牌（年份）· 誰做的：X**` ＋ 做了什麼／結果／可抄的點）
+# ─────────────────────────────────────────────────────────────
+def parse_cards(cases_file):
+    """→ [{"brand":…, "one":…, "what":…, "result":…, "points":…}]"""
+    if cases_file in _CARDS:
+        return _CARDS[cases_file]
+    p = os.path.join(REF, "cases", os.path.basename(cases_file))
+    out = []
+    if os.path.exists(p):
+        t = read(p)
+        m = re.search(r"(?m)^##\s*[一二三四五六七八九十]*、?\s*案例清單\s*$", t)
+        if m:
+            body = t[m.end():]
+            nxt = re.search(r"(?m)^##\s", body)
+            if nxt:
+                body = body[:nxt.start()]
+            # ① 表格格式
+            for r in re.findall(r"(?m)^\|\s*([\d.]+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", body):
+                if r[1].strip() in ("案例", "---"):
+                    continue
+                out.append({"brand": r[1].strip(), "one": r[2].strip(),
+                            "result": r[3].strip(), "what": "", "points": ""})
+            # ② 條列格式
+            if not out:
+                cur = None
+                for ln in body.split("\n"):
+                    h = re.match(r"^\*\*(\d+)[｜|]\s*(.+?)\*\*", ln)
+                    if h:
+                        cur = {"brand": h.group(2).strip(), "one": "",
+                               "what": "", "result": "", "points": ""}
+                        out.append(cur)
+                        continue
+                    if cur is None:
+                        continue
+                    for key, field in (("做了什麼", "what"), ("結果", "result"), ("可抄的點", "points")):
+                        mk = re.match(r"^[-*]\s*\*\*" + key + r"\*\*[：:]\s*(.+)$", ln.strip())
+                        if mk:
+                            cur[field] = mk.group(1).strip()
+    _CARDS[cases_file] = out
+    return out
+
+
+def pick_cards(play, ind, limit=2):
+    """挑可抄案例 —— **严格模式（2026-09-17 修正）**。
+
+    只認「打法自己的 `**案例**` 行裡**指名**的品牌」。指不出來就回空，
+    **絕不回落成「那個檔的第一張卡」** —— 否則會給出錯誤關聯
+    （實測踩過：§4.1「包裹卡引流」的案例行只寫「食品品牌的包裹卡引流」，
+     舊邏輯回落到 `cases/02` 的第一張卡 = 王老吉，與包裹卡毫無關係）。
+    寧可空着讓 composer 把它列進「知識庫缺口」，也不要假引用。
+    """
+    hint = play.get("cases_raw", "")
+    picks, seen = [], set()
+    for cf in play.get("cases", []):
+        for c in parse_cards(cf):
+            brand = re.split(r"[｜|·（(]", c["brand"])[0].strip()
+            if brand and brand in hint and (cf, brand) not in seen:
+                seen.add((cf, brand))
+                picks.append((cf, c))
+    return picks[:limit]
+
+
+def uncovered_plays(plays, ind):
+    """回傳「案例行指不出任何可引用卡片」的打法清單（給骨架列出待補項）。"""
+    out = []
+    for p in plays:
+        if not pick_cards(p, ind, limit=1):
+            why = ("案例行未指名品牌" if p.get("cases") else "無案例行")
+            out.append((p, why))
+    return out
+
+
+def card_line(cf, c, maxlen=200):
+    """一行卡片摘要（含出處檔名，方便回溯）。"""
+    brand = re.split(r"\s*[·・]\s*", c["brand"])[0].strip()      # 去掉「· 誰做的：…」
+    body = c.get("what") or c.get("one") or ""
+    res = c.get("result") or ""
+    txt = f"**{brand}**"
+    if body:
+        txt += f" —— {body}"
+    if res:
+        txt += f"　▶ 結果：{res}"
+    if len(txt) > maxlen:
+        txt = txt[:maxlen].rstrip() + "…"
+    return f"{txt}（`{cf}`）"
+
+
+def _book(b):
+    """49 書籍字串 → 引用格式。容忍沒有「｜作者」的字串，不崩。"""
+    parts = [x.strip() for x in b.split("｜")]
+    name = parts[0]
+    author = parts[1] if len(parts) > 1 else ""
+    return f"{name}（{author}49）" if author else f"{name}（49）"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -289,11 +427,14 @@ def infer_industry(gate, kmap):
     return best
 
 
-def play_block(i, p, kmap):
+def play_block(i, p, kmap, ind=""):
     models, books = theory_for(p, kmap)
-    mtxt = "、".join(model_label(c) for c in models)
+    # 2026-09-17：理論依據不再只給編號 —— 附上「解決什麼問題 ＋ 前幾步」
+    mtxt = "；".join(model_brief(c, 2) for c in models)
     btxt = "、".join(_book(b) for b in books)
-    cases = "、".join(f"`{c}`" for c in p["cases"]) or "—"
+    picks = pick_cards(p, ind)
+    cases = ("　".join(card_line(cf, c) for cf, c in picks) if picks
+             else "**（无）** —— 本条打法的 `**案例**` 行未指名品牌，见 §2.0.2 待补清单")
     # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
     steps = parse_steps(p["howto"])
     if steps:
@@ -310,7 +451,7 @@ def play_block(i, p, kmap):
         f"- **具体动作（精准到每一步）**：\n{howto}\n"
         f"- **谁做｜花多少｜多久见效**：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
         f"- **验收指标**：{p['verify'] or FILL}\n"
-        f"- **可抄案例**：{cases}（展开见 2.0.1）\n"
+        f"- **可抄案例（已注入卡片内容）**：{cases}\n"
         f"- **理论依据**：{mtxt} ＋ {btxt} ＋（打法库 §{p['id']}）\n"
     )
 
@@ -328,16 +469,19 @@ def build_lite(rules, plays, kmap, cardpoints, today):
         f"## 一、卡点一句话\n- 问题类型：**{cp}**\n- 真正的卡点：{FILL}（不是 X —— 是 Y）\n\n",
         f"## 二、建议打法（{len(plays)} 条）\n",
     ]
+    ind = infer_industry(gate, kmap)
     for i, p in enumerate(plays, 1):
         models, books = theory_for(p, kmap)
         steps = parse_steps(p["howto"])[:3]
         s = "；".join(f"{k}) {a}" for k, (a, _) in enumerate(steps, 1))
+        picks = pick_cards(p, ind, limit=1)
+        cl = f"　★ 可抄：{card_line(picks[0][0], picks[0][1], 180)}" if picks else ""
         lines.append(
             f"**{i}. {p['name']}**（打法库 §{p['id']}）—— {p['situation']}\n"
             f"- 怎么打：{s or FILL}\n"
             f"- 谁做｜花多少｜多久见效：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
-            f"- 理论依据：{'、'.join(model_label(c) for c in models)} ＋ "
-            f"{'、'.join(_book(b) for b in books)} ＋（打法库 §{p['id']}）\n"
+            f"- 理论依据：{'；'.join(model_brief(c, 2) for c in models)} ＋ "
+            f"{'、'.join(_book(b) for b in books)} ＋（打法库 §{p['id']}）{cl}\n"
         )
     lines += [
         f"\n## 三、预算量级\n{FILL}（各条打法预算相加；含盈虧線）\n\n",
@@ -353,6 +497,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     gate = rules.get("gate", {})
     today = datetime.date.today().isoformat()
     cp = "／".join(f"{c}（{CARDPOINT_NAME.get(c, c)}）" for c in cardpoints)
+    ind = infer_industry(gate, kmap)      # 同一個行業檔在「案例庫提示」與「案例注入」共用
 
     if tier == "速览":
         return build_lite(rules, plays, kmap, cardpoints, today)
@@ -363,8 +508,8 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
         f"你只需补 `{FILL}` 处数字与本地化描述。\n"
         f"> ⚠️ 注入的 00/03/49 原文为繁体，且可能含个别广告法禁用词；交付前请**本地化为简体**并逐字对照禁用词表。\n"
         f"> 生成 {today} ｜ 档位 {tier} ｜ 打法匹配自 `00-打法库 §0 总表`（SKILL.md §二 路由表驱动）\n"
-        + (f"> 同类行业案例库：`references/cases/{infer_industry(gate, kmap)}.md`（先读第一节清单）\n"
-           if infer_industry(gate, kmap)
+        + (f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n"
+           if ind
            else "> 同类行业案例库：未识别行业 → 请按品类自选 `references/cases/01–45`（先读第一节清单）\n")
         + "\n"
         f"## 执行摘要（TL;DR）\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
@@ -383,10 +528,37 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     )
 
     strategy = "## 二 · 策略\n### 2.0 打法组合（核心）\n\n"
-    strategy += "".join(play_block(i + 1, p, kmap) + "\n" for i, p in enumerate(plays))
-    strategy += "### 2.0.1 可抄案例（别人是怎么做的）\n"
+    strategy += "".join(play_block(i + 1, p, kmap, ind) + "\n" for i, p in enumerate(plays))
+    strategy += "### 2.0.1 可抄案例（已注入卡片内容 —— 别人是怎么做的）\n"
     for i, p in enumerate(plays):
-        strategy += f"- **打法 {i+1}（{p['name']}）**：来源 {('、'.join('`'+c+'`' for c in p['cases']) or FILL)}，请展开「他面对什么问题／具体做了什么／结果／我们怎么用」\n"
+        picks = pick_cards(p, ind, limit=2)
+        if picks:
+            strategy += f"- **打法 {i+1}（{p['name']}）**：\n"
+            for cf, c in picks:
+                strategy += f"  - {card_line(cf, c, 320)}\n"
+                if c.get("points"):
+                    strategy += f"    - 可抄的點：{c['points'][:200]}\n"
+            strategy += f"    - **我们怎么用**：{FILL}（面对的问题／我们改哪一步／预期结果）\n"
+        else:
+            strategy += (f"- **打法 {i+1}（{p['name']}）**：{FILL}"
+                         "（本条打法尚无可引用的指名卡片 → 见 §2.0.2）\n")
+
+    # 2026-09-17 新增：把「知识库缺口」显式写进骨架。
+    #   用户第五点投诉的根因就是「库里的东西没被用上」——但**不能靠假引用掩盖**，
+    #   要把「哪条打法指不出案例」变成方案里一条看得见、要去补的待办。
+    gaps = uncovered_plays(plays, ind)
+    strategy += "\n### 2.0.2 知识库缺口（**必须补的事实，不得编造**）\n"
+    if gaps:
+        strategy += (f"> 以下 {len(gaps)} 条打法的 `00-打法库` 案例行**未指名品牌**（或无名可指），"
+                     f"因此未能自动注入卡片。**在交付前必须做二选一**：\n"
+                     f"> ① 去 `references/cases/{ind or '（本行业档）'}` 的「案例清單」挑 1–2 张，"
+                     f"把「品牌＋做了什麼＋結果」抄进来；\n"
+                     f"> ② 补 `references/00-打法库.md` 对应条目 `**案例**` 行的指名品牌（一次性修复，全库受益）。\n"
+                     f"> ⛔ **既不补卡片、也不补案例行，就写「本行业暂无可引用的公开案例」——不许编一个案例出来。**\n\n")
+        for p, why in gaps:
+            strategy += f"- **{p['name']}**（打法库 §{p['id']}）—— {why}\n"
+    else:
+        strategy += "> 无缺口：本方案引用的每条打法都指得出具体案例卡。\n"
     strategy += (
         f"\n### 2.1 三次收窄（时间／人群／动作）\n{FILL}\n\n"
         f"### 2.2 货盘与机制\n{FILL}\n\n"
@@ -395,7 +567,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     positioning = (
         "## 三 · 定位与口径\n### 3.1 定位与差异化支点\n"
         f"- 定位语（一句话）：{FILL}\n"
-        f"- 学理依据：{'、'.join(model_label(c) for c in ['B5', 'C1'])}、{kmap['major_theory']['1']['books'][0].split('｜')[0]}（{kmap['major_theory']['1']['books'][0].split('｜')[1] if '｜' in kmap['major_theory']['1']['books'][0] else ''}49）—— 说明用在定位的哪一步\n"
+        f"- 学理依据：{'；'.join(model_brief(c, 3) for c in ['B5', 'C1'])}；{kmap['major_theory']['1']['books'][0].split('｜')[0]}（{kmap['major_theory']['1']['books'][0].split('｜')[1] if '｜' in kmap['major_theory']['1']['books'][0] else ''}49）—— 说明用在定位的哪一步\n"
         f"- 三个支点（各跟一个可查证事实）：{FILL}\n\n"
         f"### 3.2 禁用词与红线（什么话绝不能说）\n{FILL}\n\n"
         f"### 3.3 对不同人说什么\n{FILL}\n\n"

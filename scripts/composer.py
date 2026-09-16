@@ -122,9 +122,16 @@ CARDPOINT_NAME = {"A": "认知", "B": "交易", "C": "渠道", "D": "信任",
 
 
 def infer_cardpoints(gate):
-    txt = " ".join(str(v) for v in gate.values())
-    hits = [c for c, kws in CARDPOINT_KW if any(k in txt for k in kws)]
-    return hits or ["B"]
+    """卡點類型：以「卡在哪」為主（權重 3），其餘欄位為輔（權重 1）；取前 2，避免全命中。"""
+    primary = str(gate.get("卡在哪", "")) + str(gate.get("卡點", ""))
+    rest = " ".join(str(v) for k, v in gate.items() if k not in ("卡在哪", "卡點"))
+    score = {}
+    for c, kws in CARDPOINT_KW:
+        s = sum(3 for k in kws if k in primary) + sum(1 for k in kws if k in rest)
+        if s:
+            score[c] = s
+    top = [c for c, _ in sorted(score.items(), key=lambda x: -x[1])][:2]
+    return top or ["B"]
 
 
 def bigrams(s):
@@ -250,10 +257,27 @@ def parse_steps(howto):
     return steps
 
 
+def _book(b):
+    """49 書籍字串 → 引用格式。容忍沒有「｜作者」的字串，不崩。"""
+    parts = [x.strip() for x in b.split("｜")]
+    name = parts[0]
+    author = parts[1] if len(parts) > 1 else ""
+    return f"{name}（{author}49）" if author else f"{name}（49）"
+
+
+def infer_industry(gate, kmap):
+    """從『賣什麼／品類／賣給誰』推 cases 行業檔（確定性關鍵詞匹配）。"""
+    txt = " ".join(str(gate.get(k, "")) for k in ("賣什麼", "品类", "品類", "賣給誰", "行业", "行業"))
+    for kw, f in kmap.get("industry_to_cases", {}).items():
+        if kw in txt:
+            return f
+    return ""
+
+
 def play_block(i, p, kmap):
     models, books = theory_for(p, kmap)
     mtxt = "、".join(model_label(c) for c in models)
-    btxt = "、".join(f"{b.split('｜')[0]}（{b.split('｜')[1] if '｜' in b else ''}49）" for b in books)
+    btxt = "、".join(_book(b) for b in books)
     cases = "、".join(f"`{c}`" for c in p["cases"]) or "—"
     # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
     steps = parse_steps(p["howto"])
@@ -276,18 +300,57 @@ def play_block(i, p, kmap):
     )
 
 
+def build_lite(rules, plays, kmap, cardpoints, today):
+    """速覽檔：給小微企業／個案「快速看懂打法」——1–2 頁，只留決策要素。"""
+    client = rules.get("client", "客户")
+    gate = rules.get("gate", {})
+    cp = "／".join(f"{c}（{CARDPOINT_NAME.get(c, c)}）" for c in cardpoints)
+    ind = infer_industry(gate, kmap)
+    lines = [
+        f"# {client} · 打法速覽（速覽档 · composer 组装）\n",
+        f"> 給小微企業／個案：一頁看懂「該打哪幾條、怎麼打、花多少」。完整交付請改用 `--tier 标准`／`G端`。\n",
+        f"> 生成 {today} ｜ 打法匹配自 `00-打法库 §0 总表`\n\n",
+        f"## 一、卡点一句话\n- 问题类型：**{cp}**\n- 真正的卡点：{FILL}（不是 X —— 是 Y）\n\n",
+        f"## 二、建议打法（{len(plays)} 条）\n",
+    ]
+    for i, p in enumerate(plays, 1):
+        models, books = theory_for(p, kmap)
+        steps = parse_steps(p["howto"])[:3]
+        s = "；".join(f"{k}) {a}" for k, (a, _) in enumerate(steps, 1))
+        lines.append(
+            f"**{i}. {p['name']}**（打法库 §{p['id']}）—— {p['situation']}\n"
+            f"- 怎么打：{s or FILL}\n"
+            f"- 谁做｜花多少｜多久见效：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
+            f"- 理论依据：{'、'.join(model_label(c) for c in models)} ＋ "
+            f"{'、'.join(_book(b) for b in books)} ＋（打法库 §{p['id']}）\n"
+        )
+    lines += [
+        f"\n## 三、预算量级\n{FILL}（各条打法预算相加；含盈虧線）\n\n",
+        f"## 四、下一步（只写一件）\n{FILL}\n",
+    ]
+    if ind:
+        lines.insert(3, f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n")
+    return "\n".join(lines)
+
+
 def build_skeleton(rules, plays, kmap, tier, cardpoints):
     client = rules.get("client", "客户")
     gate = rules.get("gate", {})
     today = datetime.date.today().isoformat()
     cp = "／".join(f"{c}（{CARDPOINT_NAME.get(c, c)}）" for c in cardpoints)
 
+    if tier == "速览":
+        return build_lite(rules, plays, kmap, cardpoints, today)
+
     head = (
         f"# {client} · 营销方案（composer 骨架 · {tier}档）\n\n"
         f"> 本骨架由 `composer.py` 机械组装：**打法／理论依据／可抄案例均来自知识库，请勿删改**；"
         f"你只需补 `{FILL}` 处数字与本地化描述。\n"
         f"> ⚠️ 注入的 00/03/49 原文为繁体，且可能含个别广告法禁用词；交付前请**本地化为简体**并逐字对照禁用词表。\n"
-        f"> 生成 {today} ｜ 档位 {tier} ｜ 打法匹配自 `00-打法库 §0 总表`（SKILL.md §二 路由表驱动）\n\n"
+        f"> 生成 {today} ｜ 档位 {tier} ｜ 打法匹配自 `00-打法库 §0 总表`（SKILL.md §二 路由表驱动）\n"
+        + (f"> 同类行业案例库：`references/cases/{infer_industry(gate, kmap)}.md`（先读第一节清单）\n"
+           if infer_industry(gate, kmap) else "")
+        + "\n"
         f"## 执行摘要（TL;DR）\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
         f"- 核心打法：{'、'.join(p['name'] for p in plays)}\n"
         f"- 预期 KPI：{FILL}\n- 盈亏线：{FILL}\n\n"

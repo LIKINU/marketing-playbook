@@ -407,22 +407,36 @@ def main():
                "USP", "獨特賣點", "独特卖点", "品類", "心智", "里斯", "特勞特", "凱勒",
                "華與華", "馮衛東", "江南春", "CBBE", "對立定位", "場景"]
     _pos_codes = _find_codes(_pos) if _pos else set()
-    _pos_rel = (_pos_codes & {f"B{i}" for i in range(1, 10)}) | (_pos_codes & {"C1", "C12", "A8", "G7", "G4", "B5", "B8"})
-    _signals = set(_pos_rel)
-    _signals |= {k for k in _pos_kw if k in _pos}
-    if _pos and len(_signals) >= 2:
+    # 定位/品牌類模型碼（B 章品牌定位、C1 超級符號、C12 視覺錘、G7 品類戰略、A8 GROW）
+    _pos_rel = _pos_codes & ({"B%d" % i for i in range(1, 10)} | {"C1", "C12", "G7", "A8"})
+    _kw_signals = {k for k in _pos_kw if k in _pos}
+    _pos_books = re.findall(r"《[^》]{1,40}》", _pos)
+    # 收緊：必須有「真定位模型碼 ≥1」＋（定位理論關鍵詞 or 定位類書 ≥1）；純堆關鍵詞不算
+    if _pos and _pos_rel and (_kw_signals or _pos_books):
         if not quiet:
-            print(f"  {OK} 第三篇含定位/品牌理論引用（{len(_signals)} 個信號：{', '.join(sorted(_signals)[:6])}…）")
+            print(f"  {OK} 第三篇定位理論引用（模型 {'、'.join(sorted(_pos_rel))}；信號 {len(_kw_signals)} 詞/書 {len(_pos_books)} 本）")
     elif _pos:
         if not quiet:
-            print(f"  {NG} 第三篇定位理論引用不足（需 ≥2 個定位/品牌理論）")
+            print(f"  {NG} 第三篇定位理論不足（需 ≥1 個定位模型碼 ＋ ≥1 個定位理論詞/書）")
         hard_errors.append(
-            "第三篇 定位與口徑 未引用 ≥2 個定位/品牌理論（如 03 §B5 四種定位法、《定位》里斯&特勞特、03 §C1 超級符號）"
+            "第三篇 定位與口徑 須引用 **≥1 個定位/品牌模型碼**（如 03 §B5／§C1／§C12）＋ **≥1 個定位理論**"
+            "（關鍵詞或《定位》《搶佔心智》等）—— 只堆關鍵詞不算"
         )
     else:
         if not quiet:
             print(f"  {WARN} 未找到第三篇定位章節，跳過")
         warnings.append("未找到第三篇 定位與口徑，無法校驗定位理論引用")
+
+    # 9) 交付稿須簡體（SKILL.md 硬要求）—— 偵測繁體字
+    #    只做警告：專業名詞可能含繁體，且 composer 骨架本就注入繁體（交付前需本地化）
+    _trad_hint = set("們個這說對產麼無為與於還進來過學經銷廣價範實樣觀點圍優質讓覺聲話術確認據應該務專態勢將團隊費責機構營運畫計劃達標類數據網絡歷總轉發構則議權價錢廠號樓區塊")
+    hit_trad = sorted({ch for ch in text if ch in _trad_hint})
+    if not quiet:
+        print(f"\n【9】交付稿簡體檢查（SKILL 要求交付稿簡體）")
+        print(f"  {'✅' if len(hit_trad) < 15 else WARN} 偵測到繁體字 {len(hit_trad)} 種"
+              + (f"（{'、'.join(hit_trad[:15])}…）" if hit_trad else ""))
+    if len(hit_trad) >= 15:
+        warnings.append(f"交付稿疑似繁體（{len(hit_trad)} 種繁體字）—— SKILL 要求對外交付稿用**簡體**，請本地化")
 
     # 結論
     print("\n" + "=" * 64)

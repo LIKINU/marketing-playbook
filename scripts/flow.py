@@ -101,6 +101,19 @@ def main():
     nxt = next(c for c in STEPS if c[0] == cur)
     print(f"📍 當前：{cur} {nxt[1]} —— {msg}")
     print(f"👉 下一步命令：{nxt[3]}")
+
+    if a.check:
+        plan = os.path.join(d, "plan.md")
+        print("-" * 60)
+        if os.path.exists(plan):
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, "selfcheck.py"), plan],
+                capture_output=True, text=True,
+            )
+            tail = [l for l in r.stdout.splitlines() if l.strip()][-1:] or ["(無輸出)"]
+            print(f"🔎 selfcheck：{tail[0]}（退出碼 {r.returncode}）")
+            sys.exit(0 if r.returncode == 0 else 1)
+        print("（--check：未見 plan.md，無可校驗）")
     print("=" * 60)
 
 

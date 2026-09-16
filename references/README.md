@@ -63,6 +63,18 @@
 | 新的好問法 | `../SKILL.md` §五 |
 | 新腳本 | `../scripts/` + 同步 `../SKILL.md` §四腳本表 |
 
+### 案例庫維護的四個腳本（順序很重要）
+```bash
+python scripts/case_lint.py                     # ① 查「公司背景」違規
+python scripts/case_clean.py --scope identity    # ② 子句級清理（先 dry-run）
+python scripts/case_relabel.py                   # ③ 補五要素結構標籤（機械、零編造）
+python scripts/case_order.py --fix               # ④ 要素順序規範化（零刪除，帶不變式）
+python scripts/case_upgrade.py --list            # ⑤ 看還差多少（五要素齊＋≥2500 字）
+```
+> ⚠️ **改案例卡後必須跑 ④ + ⑤**。歷史上多次批量改造把「③ 做了什麼」搬到卡片最後、
+> 或把 `### 3.2` 標題的換行吞掉（變成 `---### 3.2`，讓它不再是一級標題）——**這類損壞肉眼很難發現**，
+> 靠 `case_order.py` 的機械校驗 + 不變式才能保證不丟內容。
+
 **⛔ 不寫進來的**：公司背景（創始人／成立年份／股權／融資／營收／人事）、未核實數據、客戶隱私。
 **原則**：增量續寫，不整篇覆蓋；同名迭代走**升級替換**，不版本堆疊。
 

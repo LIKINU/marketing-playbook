@@ -186,15 +186,18 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 
 ## 五、檔案地圖
 
+> ⚠️ **本表只是鏡像，不是導航來源。** 唯一權威導航是 **`SKILL.md` 的「第 -1 步：你要做什麼 → 只讀這幾份」** —— 那張表還寫了「**明確不要讀**什麼」，本表沒有。**兩者衝突時以 `SKILL.md` 為準。**
+> 目錄級導航：`references/README.md`（10 份工作檔怎麼挑）、`references/cases/README.md`（50 個行業檔只讀 1 個）。
+
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
-| `SKILL.md` | **唯一入口**：門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
+| `SKILL.md` | **唯一入口**：第 -1 步導航 + 門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
 | `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `knowledge_map.json`（映射表）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
 | `references/09-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
 | `references/00-打法库.md` | 104 條打法（狀況 → 打法） | **生成方案時最先讀** |
-| `references/cases/01~50-{大類}.md` | **50 個大類 / 628 張案例卡**（01–45 行業 ＋ 46–50 機構與方法論） | 找同行參照案例時 |
+| `references/cases/01~50-{大類}.md` | **50 個大類 / 620 張深度案例卡**（01–45 行業 411 張 ＋ 46–50 機構 209 張） | 找同行參照案例時**只讀你客戶那 1 檔** |
 | `references/03-方法论操作手册.md` | **111 個模型（A–M）怎麼填** | 需要用具體模型時 |
 | `references/01-接案输出模板.md` | **逐章寫作指南**（目的／必含／寫法／範例／常見錯誤） | **寫方案時必讀** |
 | `references/02-多Agent分工简报.md` | 五份角色簡報 + 三種環境執行方式 + 裁決規則 | 多 Agent 分工時 |
@@ -210,7 +213,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 
 ## 六、語言約定
 
-- **skill 內部文件**：繁體中文（`SKILL.md`／本檔／`README.md`／`references/00–08`／`cases/`）
+- **skill 內部文件**：繁體中文（`SKILL.md`／本檔／`README.md`／`references/00–09`／`cases/`）
 - **交付給客戶的 Word**：**簡體中文**（硬要求，`build_docx.py` 出稿前檢查）
 - **`references/范例/` 例外**：交付稿樣張是**簡體**——因為它們就是交付物本身
 - 若使用者要求其他語言，以使用者當次指示為準

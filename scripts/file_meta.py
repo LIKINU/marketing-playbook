@@ -140,7 +140,11 @@ def derive(path, t, sections, cards, kind):
     if kind == "行業檔":
         what = f"{name} 這一行的行銷案例集：**{cards} 張深度案例卡**，每卡五要素（是什麼／為什麼／做了什麼／怎麼做／效果）＋ 適用前提與坑"
     elif kind == "機構檔":
-        what = f"**{name}** 的機構案例：{cards} 張卡，**每戰役一卡**（不是機構介紹、不含公司財務與人事）"
+        # 不寫「不含公司財務與人事」這種絕對話——46–50 的「行業概覽」與 51 的卡片
+        # 本來就會引用乙方自身的毛利／收費結構（那是「選乙方」的判斷依據）。
+        # 真正要守的規則寫成紅線，讓它機械地出現在每個機構檔的檔頭。
+        what = (f"**{name}** 的機構案例：{cards} 張卡，每卡寫「誰幫誰做了什麼、怎麼做、結果如何」；"
+                f"乙方自身的營收／毛利／收費口徑**只作選乙方判斷，不得寫進對外交付物**")
     else:
         what = h1(t) or fname_stem
 
@@ -177,6 +181,10 @@ def derive(path, t, sections, cards, kind):
     ]:
         if any(kw in s for s in bare):
             got.append(desc)
+    # 46–51 的槽位叫「對接實測清單」（不帶「本行業」），要單獨收一次
+    if (any("對接實測清單" in s for s in bare)
+            and not any("本行業對接實測清單" in s for s in bare)):
+        got.append("可照着問的對接實測清單")
     marks = "①②③④⑤⑥⑦⑧⑨"
     ret = ("".join(f"{marks[i]} {g}　" for i, g in enumerate(got)).strip()
            if got else "（見下方目錄）")

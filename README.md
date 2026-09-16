@@ -145,7 +145,7 @@
 | 要用具體模型 | `references/03-方法论操作手册.md` — **111 個模型（A–M）**，含怎麼填、輸出物、常見錯誤 |
 | 方案風險自檢 | `references/04-失败归因总库.md` — 12 個失敗模式（附錄另 5 個 AI 執行者模式）+ 34 條預演清單 |
 | 客戶是**小企業／新品牌** | `references/05-小企业与新品牌从零打造.md` |
-| 要用**平台官方模型** | `references/06-本土数字营销与MCN.md`（AIPL／FAST／5A／DEEPLINK） |
+| 要用**平台官方模型** | `references/cases/51-本土数字营销与MCN.md`（AIPL／FAST／5A／DEEPLINK） |
 | 小單／快速溝通 | `references/01-接案输出模板.md` |
 | 判斷**外包還是自己幹** | `references/07-选流派矩阵与对照表.md` |
 | 選乙方、看某家做過什麼 | `references/cases/46-50`（機構案例與出版物，已統一為案例卡格式；原機構檔案已退役） |

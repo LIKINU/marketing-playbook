@@ -203,7 +203,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | `references/02-多Agent分工简报.md` | 五份角色簡報 + 三種環境執行方式 + 裁決規則 | 多 Agent 分工時 |
 | `references/04-失败归因总库.md` | 12 個失敗模式（附錄另 5 個 AI 執行者模式）+ 34 條預演清單 | 方案風險自檢 |
 | `references/05-小企业与新品牌从零打造.md` | 小企業／新品牌主入口 | 客戶是小企業或新品牌 |
-| `references/06-本土数字营销与MCN.md` | 平台官方模型（AIPL／FAST／5A／DEEPLINK） | 要用平台方法論時 |
+| `references/cases/51-本土数字营销与MCN.md` | 平台官方模型（AIPL／FAST／5A／DEEPLINK） | 要用平台方法論時 |
 | `references/07-选流派矩阵与对照表.md` | 判斷外包還是自己幹 | 要決定分工邊界時 |
 | `references/08-质量范式-便利店开学季案.md` | ⭐ **質量標尺**：角色產出規格／骨架模板／可校驗指標 | 不確定「寫到什麼程度算夠」時 |
 | `references/范例/` | 📄 **樣張（簡體）**：`-交付稿.md/.docx`、`-原版.md`、`-任务规则表.json`、`-预算表.json` | 想看成品／輸入文件長什麼樣時 |

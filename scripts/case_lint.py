@@ -61,7 +61,9 @@ def main():
         base = os.path.basename(f)
         m = re.match(r"(\d+)", base)
         n = int(m.group(1)) if m else 0
-        t = read(f)
+        raw = read(f)
+        # 標題（品牌名+角度）＝參考對象，不計入「公司背景」違規
+        t = "\n".join(l for l in raw.splitlines() if not re.match(r"^#{1,6}\s", l))
         hits = {w: t.count(w) for w in BG_WORDS if t.count(w)}
         cnt = sum(hits.values())
         if n not in EXEMPT_SKIP:

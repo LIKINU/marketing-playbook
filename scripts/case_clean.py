@@ -80,6 +80,8 @@ def _prefix(ln):
 
 def clean_line(ln, forbid=None):
     forbid = forbid if forbid is not None else IDENTITY
+    if re.match(r"^#{1,6}\s", ln):          # 標題（品牌名+角度）＝參考對象，絕不動
+        return ln, 0
     if ln.lstrip().startswith((">", "|")) or "可信度" in ln:
         return ln, 0
     prefix = _prefix(ln)

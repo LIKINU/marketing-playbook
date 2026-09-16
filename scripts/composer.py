@@ -232,16 +232,43 @@ def load_model_names(path):
 # ─────────────────────────────────────────────────────────────
 # 5. 產出骨架
 # ─────────────────────────────────────────────────────────────
+def parse_steps(howto):
+    """把打法库的「怎麼做」拆成结构化步骤：[(动作, 产出), ...]"""
+    steps = []
+    for ln in howto.splitlines():
+        m = re.match(r"^\s*\d+[.、]\s*(.+)$", ln)
+        if not m:
+            continue
+        body = m.group(1).strip()
+        out = ""
+        mo = re.search(r"產出[：:]\s*(.+)$", body)
+        if mo:
+            out = mo.group(1).strip().rstrip("。")
+            body = body[:mo.start()].strip().rstrip("。")
+        if body:
+            steps.append((body, out))
+    return steps
+
+
 def play_block(i, p, kmap):
     models, books = theory_for(p, kmap)
     mtxt = "、".join(model_label(c) for c in models)
     btxt = "、".join(f"{b.split('｜')[0]}（{b.split('｜')[1] if '｜' in b else ''}49）" for b in books)
-    howto = "\n".join("  " + x for x in p["howto"].splitlines() if x.strip())
     cases = "、".join(f"`{c}`" for c in p["cases"]) or "—"
+    # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
+    steps = parse_steps(p["howto"])
+    if steps:
+        s_lines = [
+            f"  {k}. {act} ｜ 时间：{FILL} ｜ 谁做：{FILL} ｜ 物料·话术：{FILL} ｜ 产出：{out or FILL}"
+            for k, (act, out) in enumerate(steps, 1)
+        ]
+        howto = "\n".join(s_lines)
+    else:
+        howto = "  1. " + FILL
     return (
         f"**打法 {i}｜{p['name']}**（打法库 §{p['id']}）\n"
         f"- **为什么用它**：{p['situation'] or FILL}\n"
-        f"- **具体动作**：\n{howto or '  ' + FILL}\n"
+        f"- **具体动作（精准到每一步）**：\n{howto}\n"
         f"- **谁做｜花多少｜多久见效**：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
         f"- **验收指标**：{p['verify'] or FILL}\n"
         f"- **可抄案例**：{cases}（展开见 2.0.1）\n"

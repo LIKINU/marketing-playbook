@@ -305,6 +305,23 @@ def main():
             print(f"  {WARN} 未引用案例庫可抄案例")
         warnings.append("打法組合表建議加「可抄案例」列（引用 cases/01–49 的具體卡片）——611 張卡應被調用")
 
+    # 7e 每條打法的「具體動作」須精準到每一步（≥3 個編號步驟）—— 硬錯誤
+    #    用戶 2026-09-16：「策劃具體操作流程還是沒寫好，要詳細精準到每一步 —— 指策劃案的打法和實操」
+    p_blocks = re.split(r"(?m)^\*\*打法\s*\d+", text)[1:]
+    thin = [i + 1 for i, b in enumerate(p_blocks)
+            if len(re.findall(r"(?m)^\s*\d+[.、]", b)) < 3]
+    if p_blocks:
+        if not thin:
+            if not quiet:
+                print(f"  {OK} 每條打法都有 ≥3 步的逐步驟實操（{len(p_blocks)} 條）")
+        else:
+            if not quiet:
+                print(f"  {NG} 有 {len(thin)} 條打法的實操不足 3 步")
+            hard_errors.append(
+                f"打法 {thin} 的「具體動作」不足 3 個編號步驟 —— 每條打法須寫到「精準到每一步」"
+                "（動作／誰做／時間／物料·話術／產出），不能只寫一句話"
+            )
+
     # 8) 知識庫強制引用（2026-09-16 新增：對齊 SKILL.md 第 2 篇「知識庫強制引用」callout）
     #    根因：SKILL.md 文字層早已要求引用 打法庫/03/49，但生成時常被整篇忽略，
     #    造成「skills 有很多內容但沒運用到策劃」——本塊把它變成機械硬門檻（不通過＝不出稿）。

@@ -37,7 +37,11 @@ ELEM = {
 
 def cards(path):
     t = open(path, encoding="utf-8").read()
+    # 非案例卡：標題含「專節／清單／總表／速查」的是參考頁，不按五要素考核
+    NON_CASE = ("專節", "清單", "總表", "速查", "對照表")
     for m in re.finditer(r"(?m)^###\s+(\d+\.\d+)\s+(.+)$", t):
+        if any(k in m.group(2) for k in NON_CASE):
+            continue
         seg = t[m.end():]
         nxt = re.search(r"(?m)^#{1,3}\s", seg)
         yield m.group(1), m.group(2)[:34], (seg[:nxt.start()] if nxt else seg)

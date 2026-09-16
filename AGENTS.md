@@ -48,7 +48,7 @@
 | 平台 | 放哪裡 | 怎麼觸發 |
 |---|---|---|
 | **Claude Code / Claude.ai** | 專案目錄 `.claude/skills/marketing-playbook/` 或使用者級 `~/.claude/skills/` | 說「出方案」等觸發語；SKILL.md 的 frontmatter（name/description）會被讀取 |
-| **WorkBuddy** | `平台的 skills／插件目錄`（已裝，） | 直接說客戶情況即觸發 |
+| **WorkBuddy** | 平台的 skills／插件目錄 | 直接說客戶情況即觸發 |
 | **Cursor / Windsurf / ZCode 類** | 放在專案根目錄，並在專案的 `AGENTS.md` 或規則檔中寫一行「行銷方案相關任務請先讀 `marketing-playbook/SKILL.md`」 | 依工具的規則載入機制 |
 | **其他支援通用 skill 規範的工具** | 依其約定放置；核心是讓 Agent 能讀到 `SKILL.md` | 同左 |
 

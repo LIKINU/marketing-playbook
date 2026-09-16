@@ -29,7 +29,9 @@
     --budget   預算表 JSON（建議填；缺省會警告——協議 3 第 7 項要求預算能對上）
     --plan     方案 Markdown（**必填**）
     -o         輸出 .docx 路徑（**必填**）
-    --title    文檔標題；--subtitle 副標題；--date 日期
+    --title    文檔標題（預設簡體「营销方案」）；--subtitle 副標題；--date 日期；--author 署名
+    --banned   自訂禁用詞表 JSON（透傳 selfcheck／build_docx）
+    --force    緊急出口：透傳 build_docx 跳過自檢（交付時必須聲明未校驗）
 
 退出碼
 ------
@@ -73,9 +75,12 @@ def main():
     ap.add_argument("--budget", help="預算表 JSON（建議填）")
     ap.add_argument("--plan", required=True, help="方案 Markdown（必填）")
     ap.add_argument("-o", "--out", required=True, help="輸出 .docx（必填）")
-    ap.add_argument("--title", default="營銷方案")
+    ap.add_argument("--title", default="营销方案")
     ap.add_argument("--subtitle", default="")
     ap.add_argument("--date", default="")
+    ap.add_argument("--author", default="")
+    ap.add_argument("--banned", default="", help="自訂禁用詞表 JSON（透傳給 selfcheck／build_docx）")
+    ap.add_argument("--force", action="store_true", help="緊急出口：透傳給 build_docx（交付時必須聲明未校驗）")
     a = ap.parse_args()
 
     # ---------- 前置檢查：缺檔案直接拒絕，不浪費後面幾關 ----------
@@ -103,9 +108,10 @@ def main():
             print(f"\n{'─' * 64}\n{label}（未提供 --budget → 自動從方案稿抓預算表）\n{'─' * 64}")
             rc_auto = run("budget_check.py", [a.plan], f"{label}（自動抓表）")
             if rc_auto != 0:
-                print("⚠️  自動抓表未通過 —— 可能是抓錯了表（方案裡第一張含「金額」的表）。")
-                print("    建議：提供 --budget budget.json（顯式、可靠）")
-                failures.append("預算校驗未可靠執行（自動抓表未通過，建議補 --budget）")
+                # 舊版只記為警告、照樣出稿 → 等於把「阻斷關」降級了。改回阻斷（協議 3 第 7 項）。
+                print(f"\n{NG} 預算校驗未通過（自動抓表）—— **未生成 .docx**。")
+                print(f"{HINT} 建議提供 --budget budget.json（顯式、可靠）；修正後重跑。")
+                sys.exit(1)
             continue
         rc = run(script, args, label)
         if rc != 0:
@@ -120,10 +126,12 @@ def main():
 
     # ⑤ 出稿
     docx_args = [a.plan, "-o", a.out, "--rules", a.rules, "--title", a.title]
-    if a.subtitle:
-        docx_args += ["--subtitle", a.subtitle]
-    if a.date:
-        docx_args += ["--date", a.date]
+    for flag, val in [("--subtitle", a.subtitle), ("--date", a.date),
+                      ("--author", a.author), ("--banned", a.banned)]:
+        if val:
+            docx_args += [flag, val]
+    if a.force:
+        docx_args += ["--force"]
     rc = run("build_docx.py", docx_args, STEPS[4][0])
 
     print("\n" + "=" * 64)
@@ -134,11 +142,14 @@ def main():
         sys.exit(1)
 
     size = os.path.getsize(a.out)
-    print(f"{OK} 全鏈通過，已出稿：{a.out}（{size // 1024} KB）")
     if failures:
-        print("⚠️  但有未執行的關卡（交付前請人工確認）：")
+        # 有未通過／未執行的關卡 → 不算完成（舊版照樣印「全鏈通過」並 exit 0，會誤導）
+        print(f"{NG} 已出稿，但有未通過／未執行的關卡 —— **不得宣稱完成**：")
         for f in failures:
             print(f"   · {f}")
+        print("=" * 64)
+        sys.exit(1)
+    print(f"{OK} 全鏈通過，已出稿：{a.out}（{size // 1024} KB）")
     print(f"{HINT} 別忘了：把 12 項《交付自檢單》原樣輸出在回覆中（協議 3）。")
     print("=" * 64)
     sys.exit(0)

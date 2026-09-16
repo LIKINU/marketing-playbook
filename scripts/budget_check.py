@@ -49,29 +49,94 @@ def load(path: str):
         return json.load(f), None
 
 
+AMT_KEYS = ("金額", "金额", "預算", "预算", "費用", "费用", "成本", "單價", "单价", "價格", "价格")
+NAME_KEYS = ("分項", "分项", "項目", "项目", "名稱", "名称", "物料", "行動", "行动", "類別", "类别", "品項", "品项")
+
+
+def _parse_amt(s: str):
+    """把單元格解析成金額（容忍 **粗體**、¥、千分位、「萬/万」）。解析不了回 None。"""
+    if s is None:
+        return None
+    t = re.sub(r"[¥￥$*`,\s元]", "", str(s))
+    m = re.match(r"^(\d+(?:\.\d+)?)(萬|万)?$", t)
+    if not m:
+        return None
+    v = float(m.group(1))
+    return v * 10000 if m.group(2) else v
+
+
 def parse_md_table(text: str):
-    """從 Markdown 抓「項目 | 金額」表格，回傳 (items, total)"""
-    items, total = [], None
+    """從 Markdown 抓「項目 | 金額」表格，回傳 (items, total)。
+
+    改進（2026-09-16）：舊版寫死「金額在第 2 列」，遇到 skill 自帶的 3 列表
+    （`| # | 分項 | 金額 |`）會取錯列、且表頭行被當成資料 → 整表解析失敗。
+    現在逐個表格區塊：先由表頭關鍵詞定金額列，定不到就選「多數行可解析成金額」的那列；
+    再定名稱列；並支援粗體與「萬」。
+    """
+    tables = list(_iter_tables(text))
+    # 第一遍：只認「表頭含『金額』」的表（這才是預算表）；第二遍才退而求其次
+    for rows in tables:
+        r = _extract_budget(rows, require_money=True)
+        if r:
+            return r
+    for rows in tables:
+        r = _extract_budget(rows, require_money=False)
+        if r:
+            return r
+    return [], None
+
+
+def _iter_tables(text):
+    """把 Markdown 切成一個一個表格（已去掉分隔行）。"""
     lines = text.splitlines()
-    for line in lines:
-        if "|" not in line:
+    i = 0
+    while i < len(lines):
+        if "|" not in lines[i]:
+            i += 1
             continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 2:
+        blk = []
+        while i < len(lines) and "|" in lines[i]:
+            blk.append(lines[i])
+            i += 1
+        rows = [[c.strip() for c in raw.strip().strip("|").split("|")] for raw in blk]
+        rows = [r for r in rows if not all(re.match(r"^[-:\s]*$", c or "") for c in r)]
+        if len(rows) >= 2:
+            yield rows
+
+
+def _extract_budget(rows, require_money):
+    """從一個表格抽出 (items, total)；不是預算表就回 None。"""
+    header = rows[0]
+    if require_money:
+        amt_idx = next((j for j, c in enumerate(header) if "金額" in c or "金额" in c), -1)
+    else:
+        amt_idx = next((j for j, c in enumerate(header) if any(k in c for k in AMT_KEYS)), -1)
+        if amt_idx < 0:
+            ncol = max(len(r) for r in rows[1:])
+            tally = [(sum(1 for r in rows[1:] if j < len(r) and _parse_amt(r[j]) is not None), j)
+                     for j in range(ncol)]
+            tally = [(c, j) for c, j in tally if c > 0]
+            if tally:
+                amt_idx = max(tally)[1]
+    if amt_idx < 0:
+        return None
+    nums = sum(1 for r in rows[1:] if amt_idx < len(r) and _parse_amt(r[amt_idx]) is not None)
+    if nums < 2:            # 真預算表至少 2 個金額行（擋掉「渠道表」也有預算列的情況）
+        return None
+    name_idx = next((j for j, c in enumerate(header) if any(k in c for k in NAME_KEYS)), -1)
+    if name_idx < 0 or name_idx == amt_idx:
+        name_idx = 1 if (len(header) > 2 and amt_idx != 1) else 0
+    items, total = [], None
+    for r in rows[1:]:
+        amt = _parse_amt(r[amt_idx]) if amt_idx < len(r) else None
+        if amt is None:
             continue
-        # 跳過表頭與分隔線
-        if re.match(r"^[-:\s]+$", cells[0]) or "金額" in cells[1] or "金额" in cells[1] or "预算" in cells[1]:
-            continue
-        name = cells[0]
-        raw = re.sub(r"[¥￥$,\s元]", "", cells[1])
-        if not re.match(r"^\d+(\.\d+)?$", raw):
-            continue
-        amt = float(raw)
+        name = r[name_idx].strip("* ") if (name_idx < len(r) and name_idx != amt_idx) else ""
         if any(k in name for k in ("合計", "合计", "總計", "总计", "小計", "小计")):
             total = amt
         else:
-            items.append({"name": name, "amount": amt})
-    return items, total
+            items.append({"name": name or f"項 {len(items) + 1}", "amount": amt})
+    return (items, total) if items else None
 
 
 def main():

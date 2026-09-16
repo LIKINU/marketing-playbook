@@ -215,8 +215,13 @@ def theory_for(play, kmap):
             ov = kmap["play_overrides"][key]
             break
     major = kmap["major_theory"].get(str(play["major"]), {})
-    models = list(ov["models"]) if ov else list(major.get("models", []))[:3]
-    books = list(ov["books"]) if ov else list(major.get("books", []))[:2]
+    if ov:
+        models, books = list(ov["models"]), list(ov["books"])
+    else:
+        # 章內取「首／中／末」三個模型，覆蓋比固定取前 3 個（常是 B1/B2/B3 這種泛模型）更廣
+        cm = list(major.get("models", []))
+        models = [cm[0], cm[len(cm) // 2], cm[-1]] if len(cm) >= 3 else cm
+        books = list(major.get("books", []))[:2]
     return models, books
 
 
@@ -442,6 +447,7 @@ def main():
     ap.add_argument("--tier", default="标准", choices=["速览", "标准", "G端"])
     ap.add_argument("--top", type=int, default=5)
     a = ap.parse_args()
+    a.top = max(3, min(7, a.top))   # 打法數鎖在 3–7（與 SKILL「3–7 條為宜」一致）
 
     if not os.path.exists(a.rules):
         print(f"❌ 找不到规则表：{a.rules}")

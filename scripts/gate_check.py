@@ -4,7 +4,8 @@
 門禁校驗 · gate_check.py  （marketing-playbook 協議 1）
 
 用途：AI 問完門禁後、動筆寫方案前，跑一次這個腳本。
-      13 項有任何一項沒填、或《任務規則表》沒經用戶確認 → 直接報錯，不准往下走。
+      門禁 13 項有任何一項沒填、或《任務規則表》沒經用戶確認、或**缺「交付長度」（第 14 項）**
+      → 直接報錯，不准往下走。
 
 用法：
     python gate_check.py gate.json
@@ -62,25 +63,52 @@ def is_filled(v) -> bool:
     if not s:
         return False
     # 佔位符／「查不到」也算沒填（門禁項不接受「不知道」）
-    bad = ["todo", "tbd", "待補", "待补", "未知", "不清楚", "n/a", "na", "?", "？", "查不到", "未提供"]
+    bad = ["todo", "tbd", "待補", "待补", "待定", "待確認", "待确认", "未知", "不清楚",
+           "不確定", "不确定", "暂无", "暫無", "无", "無", "没有", "沒有", "未定", "未確認",
+           "未确认", "n/a", "na", "?", "？", "查不到", "未提供", "-", "—", "nil", "null"]
     return s.lower() not in bad
 
 
 def match_item(gate: dict, aliases: list, used: set):
-    """按別名匹配 gate 裡的 key；回傳 (key, value) 或 (None, None)"""
+    """按別名匹配 gate 裡的 key；回傳 (key, value) 或 (None, None)。
+
+    改進（2026-09-16）：舊版「第一個命中的 key」會在短別名（如「問題」「人群」）上誤配。
+    現在取「最長命中別名」的 key（完全相等再加權），把誤配降到最低。
+    """
+    best_k, best_v, best_score = None, None, -1
     for k, v in gate.items():
         if k in used:
             continue
         kl = str(k).lower()
         for a in aliases:
-            if a.lower() in kl:
-                return k, v
-    return None, None
+            al = a.lower()
+            if not al:
+                continue
+            if al in kl:
+                score = len(al) + (1000 if kl == al else 0)  # 完全相等最優先
+                if score > best_score:
+                    best_k, best_v, best_score = k, v, score
+    return best_k, best_v
+
+
+USAGE = """用法: python gate_check.py <gate.json|->
+
+輸入 JSON（欄位名可自由，腳本按別名匹配）：
+{
+  "client": "客戶名",
+  "gate": { "賣什麼": "...", "賣給誰": "...", ...共 13 項... },
+  "delivery": { "結構": "精煉版", "量級": "5 頁 Word" },
+  "rules_table_confirmed": true
+}
+退出碼：0 通過 ｜ 1 不通過 ｜ 2 腳本錯誤"""
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(USAGE)
+        sys.exit(0)
     if len(sys.argv) < 2:
-        print("用法: python gate_check.py <gate.json|->")
+        print(USAGE)
         sys.exit(1)
 
     try:

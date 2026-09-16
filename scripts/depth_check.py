@@ -11,14 +11,15 @@
     python depth_check.py plan.md
     python depth_check.py plan.md --quiet      # 只輸出結論
 
-退出碼：0 = 深度達標；1 = 有硬指標不達標；2 = 腳本自身出錯
+退出碼：**0 = 一律（本腳本只診斷、不阻攔出稿，用戶定調 2026-09-14）**；2 = 腳本自身出錯
+        （注意：即使有 ❌ 硬指標，仍回 0 —— 要不要加厚由用戶決定，不由腳本判死）
 
 判斷分三級（與 selfcheck.py 一致）：
     ❌ 硬指標 → 退出碼 1，必須補
     ⚠️ 警告   → 需人工確認（不影響退出碼）
     ✅ 通過
 
-閾值來源：所有數字取自 `references/范本-罗森案范式.md`（以下簡稱「范式档」），
+閾值來源：所有數字取自 `references/08-质量范式-便利店开学季案.md`（以下簡稱「范式档」），
          每條閾值旁標註「§X.Y #N」即該文件第 X.Y 節第 N 項實測值，未經改寫。
          凡標「推導」者，表示范式档未直接給出該數字，由相鄰實測項保守反推。
 
@@ -158,6 +159,7 @@ T = {
     "千字密度警告": 8.0,  # 推導：同上，取建議值
     # 【8】空話檢測
     "空話詞": 5,          # 推導：范式档 §4.2 反面清單（「全文沒有一個不可驗收的指標」）
+    "空話密度": 6,        # 推導：每千字「無動作詞」上限（與千字數字密度對照；舊版硬編碼 6）
     # 【9】重複度（2026-09-14 新增；校準樣本見 check_repeats() 的註釋）
     "重複句長度": 12,     # 推導：低於 12 字的片段多是表格欄名與慣用語，噪音大。
                           # 依據：原版最長的重複句剛好 12 字（「家长版学校发的您领了
@@ -326,7 +328,9 @@ def tables_in(lines, rng):
         rows = []
         for idx, raw in enumerate(blk):
             cells = [c.strip() for c in raw.strip().strip("|").split("|")]
-            if idx == 1 and cells and all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
+            # 分隔行：整行只由 - : 空白組成，且至少有一個 "-"（容忍空單元格與對齊冒號）
+            if idx == 1 and cells and all(re.fullmatch(r"[-:\s]*", c) for c in cells) \
+                    and any("-" in c for c in cells):
                 continue
             rows.append(cells)
         if rows:
@@ -907,8 +911,8 @@ def check_vague(text):
                f"（建議 ≤{T['空話詞']}）——這些詞往往意味著「沒寫具體動作」"
                + (f"｜高頻：{top}" if top else ""))
     dens = total / (chars / 1000)
-    if dens > 6:
-        d.warn(f"無動作詞密度 {dens:.1f} 個/千字（建議 ≤3）——空話比例偏高")
+    if dens > T["空話密度"]:
+        d.warn(f"無動作詞密度 {dens:.1f} 個/千字（建議 ≤{T['空話密度']}）——空話比例偏高")
     return d
 
 
@@ -1049,6 +1053,7 @@ def main():
 
     lines = text.splitlines()
     all_tables = tables_in(lines, (0, len(lines)))
+    HARD.clear(); WARNS.clear()   # 防重入污染（同一進程跑多次時）
 
     dims = [
         check_competitors(lines, text),
@@ -1100,7 +1105,7 @@ def main():
         print(f"{WARN} {len(WARNS)} 項警告，交付前請人工確認：")
         for w in WARNS:
             print(f"   · {w}")
-    print("\n→ 閾值來源：references/范本-罗森案范式.md §五（羅森案 9 份產出實測）。")
+    print("\n→ 閾值來源：references/08-质量范式-便利店开学季案.md §五（羅森案 9 份產出實測）。")
     sys.exit(0)
 
 

@@ -68,24 +68,25 @@ def read_text(path: str) -> str:
         except ImportError:
             print(f"{NG} 讀取 .docx 需要 python-docx：pip install python-docx")
             sys.exit(2)
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
         d = Document(path)
         out = []
-        for p in d.paragraphs:
-            txt = p.text.strip()
-            if not txt:
-                continue
-            style = (p.style.name or "").lower()
-            m = re.search(r"heading\s*(\d)", style)
-            if m:
-                out.append("#" * (int(m.group(1)) + 1) + " " + txt)
-            else:
-                out.append(txt)
-        # 表格也取出來（范本里的清單常在表格）
-        for t in d.tables:
-            for row in t.rows:
-                cells = [c.text.strip() for c in row.cells]
-                if any(cells):
-                    out.append("| " + " | ".join(cells) + " |")
+        # 按文檔**原始順序**取段落與表格（舊版把表格全部排到末尾 → 清單表跑到最後，順序全錯）
+        for child in d.element.body.iterchildren():
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "p":
+                txt = Paragraph(child, d).text.strip()
+                if not txt:
+                    continue
+                style = (Paragraph(child, d).style.name or "").lower()
+                m = re.search(r"heading\s*(\d)", style)
+                out.append(("#" * (int(m.group(1)) + 1) + " " + txt) if m else txt)
+            elif tag == "tbl":
+                for row in Table(child, d).rows:
+                    cells = [c.text.strip() for c in row.cells]
+                    if any(cells):
+                        out.append("| " + " | ".join(cells) + " |")
         return "\n".join(out)
     with open(path, encoding="utf-8", errors="ignore") as f:
         return f.read()
@@ -109,13 +110,14 @@ def split_sections(md: str, max_level: int = 3):
     return secs
 
 
-try:  # 可選：繁簡歸一化，讓自動匹配更準（沒有 opencc 就跳過）
+_HAS_OPENCC = True
+try:  # 可選：繁簡歸一化，讓自動匹配更準
     from opencc import OpenCC
-    _S2T = None
     _T2S = OpenCC("t2s")
     def _fold(s: str) -> str:
         return _T2S.convert(s)
 except Exception:
+    _HAS_OPENCC = False
     def _fold(s: str) -> str:
         return s
 
@@ -171,10 +173,16 @@ def main():
     print(f"  源稿：{a.source}（{len(src_secs)} 個章節）")
     print(f"  范本：{a.template}（{len(tpl_secs)} 個章節）")
     print("=" * 64)
+    if not _HAS_OPENCC:
+        print(f"{WARN} 未安裝 opencc → 自動匹配**不折算繁簡**"
+              f"（源稿簡體、范本繁體時匹配率會偏低）；可 `pip install opencc`，或直接用 --map 指定。")
 
     # ---------- 映射 ----------
     if a.mapfile and os.path.exists(a.mapfile):
         mapping = json.load(open(a.mapfile, encoding="utf-8"))
+        # 兜底：映射鍵與範本標題在繁簡／標點上不一致時，按 norm() 歸一後再對一次
+        norm_tpl = {norm(t): t for t in tpl_titles}
+        mapping = {norm_tpl.get(norm(k), k): v for k, v in mapping.items()}
         print(f"\n{OK} 使用提供的映射表（{len(mapping)} 條）")
     else:
         mapping = suggest_map(src_titles, tpl_titles)
@@ -243,7 +251,10 @@ def main():
     if leftovers:
         print(f"\n{OK} 源稿有 {len(leftovers)} 節範本沒對應位 → 已整節移入附錄（未丟）")
 
+    if gained:
+        print(f"\n{HINT} 重排後新增的要素（範本要求、源稿原本沒有）：{'、'.join(gained)}")
     if a.out:
+        os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
         with open(a.out, "w", encoding="utf-8") as f:
             f.write(out_md)
         print(f"\n{OK} 已寫出：{a.out}（{len(out_md.splitlines())} 行）")
@@ -259,6 +270,7 @@ def main():
         rep += [f"- {t}" for t in unfilled] or ["- （無）"]
         rep += ["", "## 源稿有、範本沒對應位（已移入附錄）", ""]
         rep += [f"- {t}" for t in leftovers] or ["- （無）"]
+        os.makedirs(os.path.dirname(os.path.abspath(a.report)), exist_ok=True)
         with open(a.report, "w", encoding="utf-8") as f:
             f.write("\n".join(rep))
         print(f"{OK} 已寫出核對報告：{a.report}")

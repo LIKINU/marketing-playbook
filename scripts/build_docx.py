@@ -83,8 +83,16 @@ def shade(cell, hexcolor="F2F2F2"):
 # ---------- Markdown 解析（夠用即可） ----------
 
 def strip_inline(s):
-    """去掉行內標記，回傳 (純文字, 是否粗體段列表)。這裡做簡單處理：**x** → 粗體"""
-    return re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    """去掉行內標記（Word 裡不該出現 Markdown 符號）。
+
+    舊版只去 **粗體**，於是 composer 注入的 `cases/xx.md` 反引號、*斜體*、[連結](url)
+    會原樣留在 .docx 裡 —— 客戶看到一堆 `` ` ``。這裡一次清乾淨。
+    """
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)                       # **粗體**
+    s = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", s)          # *斜體*
+    s = re.sub(r"`([^`]+)`", r"\1", s)                            # `行內碼`
+    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)                # [文字](連結)
+    return s
 
 
 def add_paragraph_with_bold(doc, text, size=10.5, style=None):
@@ -106,8 +114,9 @@ def parse_table_block(block_lines):
     rows = []
     for ln in block_lines:
         cells = [c.strip() for c in ln.strip().strip("|").split("|")]
-        if all(re.match(r"^[-:\s]*$", c) for c in cells):
-            continue  # 分隔行
+        # 分隔行：整行只由 - : 空白組成，且至少有一個 "-"（否則全空行會被誤刪）
+        if all(re.match(r"^[-:\s]*$", c) for c in cells) and any("-" in c for c in cells):
+            continue
         rows.append(cells)
     return rows
 
@@ -208,7 +217,8 @@ def main():
     ap.add_argument("--rules", default="", help="《任務規則表》JSON —— **沒提供會拒絕出稿**（用來強制『先問用戶』）")
     ap.add_argument("--no-cover", action="store_true", help="不生成封面（省約 1 頁）—— 頁數緊張時用")
     ap.add_argument("--no-toc", action="store_true", help="不生成目錄（省約 1 頁）—— 5 頁以內的小文檔建議加上")
-    ap.add_argument("--skip-check", action="store_true", help="跳過自檢（僅內部預覽，不建議）")
+    ap.add_argument("--skip-check", action="store_true",
+                    help="跳過自檢（僅內部預覽用）。行為同 --force，但語義是『預覽』；正式交付請用 --force 並聲明未校驗")
     ap.add_argument("--force", action="store_true",
                     help="緊急出口（協議 8）：跳過自檢強制生成。交付時必須聲明「本稿未通過校驗」並列出未通過項")
     args = ap.parse_args()
@@ -292,6 +302,13 @@ def main():
         md = f.read()
     md_body = re.sub(r"^---\n.*?\n---\n", "", md, flags=re.S)
 
+    # 交付稿須簡體（SKILL 硬要求）—— 出稿前大聲提醒（不阻攔，但必須知道）
+    _trad = set("們個這說對產麼無為與於還進來過學經銷廣價範實樣觀點圍優質讓覺聲話術確認據應該務專態勢將團隊費責機構營運畫計劃達標類數據網絡歷總轉發構則議權")
+    _hit = sorted({ch for ch in md_body if ch in _trad})
+    if len(_hit) >= 15:
+        print(f"{WARN} 交付稿疑似繁體（{len(_hit)} 種繁體字：{'、'.join(_hit[:12])}…）")
+        print(f"{WARN} SKILL 要求對外交付稿用**簡體**；請先本地化再交付。")
+
     doc = Document()
     # 頁面設定
     for section in doc.sections:
@@ -355,6 +372,8 @@ def main():
     out = args.output
     if not out.lower().endswith(".docx"):
         out += ".docx"
+    _dir = os.path.dirname(os.path.abspath(out))
+    os.makedirs(_dir, exist_ok=True)   # 輸出目錄不存在時自動建立（舊版會直接拋錯）
     doc.save(out)
     size_kb = os.path.getsize(out) / 1024
     print(f"{OK} 已生成：{out}（{size_kb:.0f} KB）")

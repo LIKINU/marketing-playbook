@@ -219,9 +219,16 @@ def theory_for(play, kmap):
     if ov:
         models, books = list(ov["models"]), list(ov["books"])
     else:
-        # 章內取「首／中／末」三個模型，覆蓋比固定取前 3 個（常是 B1/B2/B3 這種泛模型）更廣
+        # 章內按「模型名 ↔ 打法名／適用狀況」的字面相關度挑 3 個（比固定取首/中/末貼切）
         cm = list(major.get("models", []))
-        models = [cm[0], cm[len(cm) // 2], cm[-1]] if len(cm) >= 3 else cm
+        bg = bigrams(play["name"] + play.get("situation", ""))
+
+        def _rel(code):
+            nm = _M03_RE.get(code.upper(), "")
+            return len(bigrams(nm) & bg) if nm else 0
+
+        cm = sorted(cm, key=lambda c: (-_rel(c), c))
+        models = cm[:3] if len(cm) >= 3 else cm
         books = list(major.get("books", []))[:2]
     return models, books
 
@@ -274,10 +281,12 @@ def _book(b):
 def infer_industry(gate, kmap):
     """從『賣什麼／品類／賣給誰』推 cases 行業檔（確定性關鍵詞匹配）。"""
     txt = " ".join(str(gate.get(k, "")) for k in ("賣什麼", "品类", "品類", "賣給誰", "行业", "行業"))
+    # 取「最長命中關鍵詞」（最長＝最具體），避免「城市」「区域」這類泛詞誤命中（2026-09-16）
+    best, best_len = "", 0
     for kw, f in kmap.get("industry_to_cases", {}).items():
-        if kw in txt:
-            return f
-    return ""
+        if kw in txt and len(kw) > best_len:
+            best, best_len = f, len(kw)
+    return best
 
 
 def play_block(i, p, kmap):
@@ -334,8 +343,8 @@ def build_lite(rules, plays, kmap, cardpoints, today):
         f"\n## 三、预算量级\n{FILL}（各条打法预算相加；含盈虧線）\n\n",
         f"## 四、下一步（只写一件）\n{FILL}\n",
     ]
-    if ind:
-        lines.insert(3, f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n")
+    lines.insert(3, (f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n" if ind
+                     else "> 同类行业案例库：未识别行业 → 请按品类自选 `references/cases/01–45`\n"))
     return "\n".join(lines)
 
 
@@ -355,7 +364,8 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
         f"> ⚠️ 注入的 00/03/49 原文为繁体，且可能含个别广告法禁用词；交付前请**本地化为简体**并逐字对照禁用词表。\n"
         f"> 生成 {today} ｜ 档位 {tier} ｜ 打法匹配自 `00-打法库 §0 总表`（SKILL.md §二 路由表驱动）\n"
         + (f"> 同类行业案例库：`references/cases/{infer_industry(gate, kmap)}.md`（先读第一节清单）\n"
-           if infer_industry(gate, kmap) else "")
+           if infer_industry(gate, kmap)
+           else "> 同类行业案例库：未识别行业 → 请按品类自选 `references/cases/01–45`（先读第一节清单）\n")
         + "\n"
         f"## 执行摘要（TL;DR）\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
         f"- 核心打法：{'、'.join(p['name'] for p in plays)}\n"

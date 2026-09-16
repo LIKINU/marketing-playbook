@@ -25,7 +25,8 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 | S1 門禁 | 人/AI | `python scripts/gate_check.py rules.json` | 《任務規則表》 | 缺項 → **禁止產出方案內容** |
 | S2 事實收集 | AI | （連接器/文件；先盤點工具） | 事實底稿 | 缺數據 → 標【未核實】、不得進交付物 |
 | S3 組裝骨架 | **腳本** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier …` | `skeleton.md`（打法/模型/學者/案例**已注入**） | 解析失敗 → 退出碼 2 |
-| S4 填空在地化 | **模型** | （只補 `【填】`；繁體→簡體） | `plan.md` | 殘留 `【填】` → S5 判硬錯誤 |
+| **S3.5 多 Agent 分工** | **人/AI 協作** | 五角色（策略／品牌／觸達／文案／財務風控）各寫各的、互不看草稿 → 填 `roles.json` | `roles.json` | `role_check.py` 不過 → **不出稿** |
+| S4 填空在地化 | **模型** | （只補 `【填】`；繁體→簡體） | `plan.md` | 殘留 `【填】` 或**繁體** → S5 判硬錯誤 |
 | S5 交付自檢 | **腳本** | `python scripts/selfcheck.py plan.md` | 自檢報告 | 任一硬錯誤 → 退出碼 1，**不得交付** |
 | S6 深度診斷 | 腳本 | `python scripts/depth_check.py plan.md` | 9 維度報告 | **只診斷、不阻攔** |
 | S7 出稿 | **腳本** | `python scripts/run_pipeline.py …` | `方案.docx` | 任一關不過 → 不生成 `.docx` |
@@ -154,5 +155,9 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 | 「打法 → 理論依據」 | `scripts/knowledge_map.json` 的 `major_theory` / `play_overrides` |
 | 檔位結構／G端規範產物 | `scripts/composer.py` 的 `build_skeleton` |
 | 自檢門檻 | `scripts/selfcheck.py` |
+| 門禁答案質量（過短／籠統） | `scripts/gate_check.py` 的 `MIN_LEN` |
+| 多 Agent 分工校驗 | `scripts/role_check.py` |
+| 案例庫體檢（禁公司背景） | `python scripts/case_lint.py`（`--max` 設上限） |
+| **改完任何腳本 → 回歸驗證** | `python scripts/smoke_test.py`（一條命令跑 12 項：該過的過、該攔的攔） |
 
 **改完必做雙向驗證**：① 標杆範文 `selfcheck` 過（exit 0）② 造一份違規稿 `selfcheck` 攔（exit 1）。

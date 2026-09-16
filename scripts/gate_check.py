@@ -59,6 +59,7 @@ GATE_ITEMS = [
 
 OK = "✅"
 NG = "❌"
+OPT = "⚠️"
 
 
 def load_json(path: str) -> dict:
@@ -75,9 +76,10 @@ def is_filled(v) -> bool:
     if not s:
         return False
     # 佔位符／「查不到」也算沒填（門禁項不接受「不知道」）
+    # 注意：「無／没有」**不算**沒填 —— 「現成資源：無」「競爭對手：無」是合法答案（2026-09-16 修）
     bad = ["todo", "tbd", "待補", "待补", "待定", "待確認", "待确认", "未知", "不清楚",
-           "不確定", "不确定", "暂无", "暫無", "无", "無", "没有", "沒有", "未定", "未確認",
-           "未确认", "n/a", "na", "?", "？", "查不到", "未提供", "-", "—", "nil", "null"]
+           "不確定", "不确定", "暂无", "暫無", "未定", "未確認", "未确认",
+           "n/a", "na", "?", "？", "查不到", "未提供", "-", "nil", "null"]
     return s.lower() not in bad
 
 
@@ -183,6 +185,23 @@ def main():
         sys.exit(1)
 
     print(f"{OK} 門禁通過：13 項齊全 + 規則表已確認。")
+
+    # ── 答案質量（2026-09-16）：只查「填了沒」不夠，關鍵項還要「夠不夠具體」──
+    #    MIN_LEN：低於此長度視為籠統（如「預算：待定」「卡在：沒人知道」）→ 方案會失準
+    MIN_LEN = {"卡在哪（客戶原話）": 12, "賣什麼（產品/服務、客單價、毛利）": 8,
+               "賣給誰（人群、場景）": 6, "怎麼算成功（驗收標準）": 8}
+    used_q, weak = set(), []
+    for label, aliases in GATE_ITEMS:
+        k, v = match_item(gate, aliases, used_q)
+        if k is not None:
+            used_q.add(k)
+        if k is not None and is_filled(v) and label in MIN_LEN and len(str(v).strip()) < MIN_LEN[label]:
+            weak.append((label, str(v).strip()))
+    if weak:
+        print("\n" + "-" * 64)
+        for label, val in weak:
+            print(f"{OPT} {label}：內容過短（「{val}」）—— 填了但太籠統")
+        print(f"{OPT} {len(weak)} 項答案過短 —— 建議補具體的數字／場景／客戶原話，否則方案會失準")
 
     # ── 第 14 項（2026-09-14 用戶要求「先問用戶要多少」寫進 skill）──
     #    必須有用戶選定的**交付長度**，否則不准往下走。

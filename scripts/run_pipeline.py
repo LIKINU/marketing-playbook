@@ -9,10 +9,11 @@
 本檔把整條鏈串起來，**任何一關不過就中止、不生成 .docx**。
 
     ① gate_check     門禁 13 項 + 任務規則表已確認
-    ② budget_check   預算分項加總 = 合計
-    ③ selfcheck      結構 / 自檢單 / 內部文檔洩漏 / 禁用詞 / 核心方法論要素
-    ④ depth_check    9 個深度維度（**只診斷，不阻攔**）
-    ⑤ build_docx     出稿（內部會再跑一次 selfcheck）
+    ② role_check     多 Agent 分工（5 角色產出 + 裁決記錄）—— **沒走分工就不出稿**
+    ③ budget_check   預算分項加總 = 合計
+    ④ selfcheck      結構 / 自檢單 / 內部文檔洩漏 / 禁用詞 / 核心方法論要素 / 知識庫引用 / 簡體
+    ⑤ depth_check    9 個深度維度（**只診斷，不阻攔**）
+    ⑥ build_docx     出稿（內部會再跑一次 selfcheck）
 
 用法
 ----
@@ -26,6 +27,8 @@
 參數
 ----
     --rules    《任務規則表》JSON（**必填**；沒問過門禁就沒有它 → 直接拒絕）
+    --roles    多 Agent 分工記錄 JSON（**必填**；沒走分工就不出稿。格式見 role_check.py 檔頭）
+    --skip-roles 跳過分工校驗（僅小案子或用戶同意時；交付時請聲明）
     --budget   預算表 JSON（建議填；缺省會警告——協議 3 第 7 項要求預算能對上）
     --plan     方案 Markdown（**必填**）
     -o         輸出 .docx 路徑（**必填**）
@@ -52,10 +55,11 @@ OK, NG, HINT = "✅", "❌", "→"
 STEPS = [
     # (顯示名, 腳本, 是否阻斷)
     ("① 門禁校驗（gate_check）", "gate_check.py", True),
-    ("② 預算校驗（budget_check）", "budget_check.py", True),
-    ("③ 交付前自檢（selfcheck）", "selfcheck.py", True),
-    ("④ 深度診斷（depth_check，只診斷）", "depth_check.py", False),
-    ("⑤ 出稿（build_docx）", "build_docx.py", True),
+    ("② 分工校驗（role_check）", "role_check.py", True),
+    ("③ 預算校驗（budget_check）", "budget_check.py", True),
+    ("④ 交付前自檢（selfcheck）", "selfcheck.py", True),
+    ("⑤ 深度診斷（depth_check，只診斷）", "depth_check.py", False),
+    ("⑥ 出稿（build_docx）", "build_docx.py", True),
 ]
 
 
@@ -72,6 +76,8 @@ def run(script: str, args: list, label: str) -> int:
 def main():
     ap = argparse.ArgumentParser(description="marketing-playbook 唯一出稿入口")
     ap.add_argument("--rules", required=True, help="《任務規則表》JSON（必填）")
+    ap.add_argument("--roles", default="", help="多 Agent 分工記錄 JSON（**不提供會拒絕出稿**）")
+    ap.add_argument("--skip-roles", action="store_true", help="跳過分工校驗（僅小案子或用戶同意時）")
     ap.add_argument("--budget", help="預算表 JSON（建議填）")
     ap.add_argument("--plan", required=True, help="方案 Markdown（必填）")
     ap.add_argument("-o", "--out", required=True, help="輸出 .docx（必填）")
@@ -90,6 +96,19 @@ def main():
             print(f"{HINT} 沒有《任務規則表》＝沒問過門禁 → 回第 0 步把 13 項問全。")
             sys.exit(2)
 
+    # ---------- 多 Agent 分工：沒走分工就別出稿（SKILL：每次都走，不省略）----------
+    if not a.roles and not a.skip_roles:
+        print("=" * 64)
+        print(f"{NG} 拒絕出稿：未提供《多 Agent 分工記錄》（--roles）")
+        print()
+        print("SKILL 明定：**多 Agent 分工（策略／品牌／觸達／文案／財務風控）每次必走、不省略**。")
+        print("→ 做法：分工後填 roles.json（格式見 `scripts/role_check.py` 檔頭），或小案子加 `--skip-roles`。")
+        print("=" * 64)
+        sys.exit(1)
+    if a.roles and not os.path.exists(a.roles):
+        print(f"{NG} 找不到分工記錄檔：{a.roles}")
+        sys.exit(1)
+
     print("=" * 64)
     print("marketing-playbook · 一鍵出稿（唯一入口）")
     print(f"  規則表：{a.rules}")
@@ -99,10 +118,16 @@ def main():
 
     failures = []
 
-    # ① 門禁
-    for label, script, blocking in STEPS[:3]:
-        args = [a.rules] if script == "gate_check.py" else (
-            [a.budget] if script == "budget_check.py" else [a.plan])
+    # ①–④ 阻斷關
+    for label, script, blocking in STEPS[:4]:
+        if script == "gate_check.py":
+            args = [a.rules]
+        elif script == "role_check.py":
+            args = [a.roles] if a.roles else []
+        elif script == "budget_check.py":
+            args = [a.budget] if a.budget else [a.plan]
+        else:
+            args = [a.plan]
         if script == "budget_check.py" and not a.budget:
             # 沒給 --budget → 讓 budget_check 直接吃方案稿（它會自己抓預算表）
             print(f"\n{'─' * 64}\n{label}（未提供 --budget → 自動從方案稿抓預算表）\n{'─' * 64}")
@@ -121,10 +146,10 @@ def main():
                 print(f"{HINT} 修正後重跑本指令；同一項連續 2 次不過 → 停手，把問題攤給使用者（協議 8）。")
                 sys.exit(1)
 
-    # ④ 深度診斷（只診斷）
-    run("depth_check.py", [a.plan], STEPS[3][0])
+    # ⑤ 深度診斷（只診斷）
+    run("depth_check.py", [a.plan], STEPS[4][0])
 
-    # ⑤ 出稿
+    # ⑥ 出稿
     docx_args = [a.plan, "-o", a.out, "--rules", a.rules, "--title", a.title]
     for flag, val in [("--subtitle", a.subtitle), ("--date", a.date),
                       ("--author", a.author), ("--banned", a.banned)]:
@@ -132,7 +157,7 @@ def main():
             docx_args += [flag, val]
     if a.force:
         docx_args += ["--force"]
-    rc = run("build_docx.py", docx_args, STEPS[4][0])
+    rc = run("build_docx.py", docx_args, STEPS[5][0])
 
     print("\n" + "=" * 64)
     if rc != 0 or not os.path.exists(a.out):

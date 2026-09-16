@@ -465,7 +465,9 @@ def main():
         print(f"  {'✅' if len(hit_trad) < 15 else WARN} 偵測到繁體字 {len(hit_trad)} 種"
               + (f"（{'、'.join(hit_trad[:15])}…）" if hit_trad else ""))
     if len(hit_trad) >= 15:
-        warnings.append(f"交付稿疑似繁體（{len(hit_trad)} 種繁體字）—— SKILL 要求對外交付稿用**簡體**，請本地化")
+        # 改為硬錯誤（2026-09-16）：SKILL 明定交付稿必須簡體，只警告＝繁體稿照樣能出 → 規則形同虛設
+        hard_errors.append(f"交付稿疑似繁體（{len(hit_trad)} 種繁體字：{'、'.join(hit_trad[:10])}…）"
+                           f"—— SKILL 要求對外交付稿用**簡體**，請本地化後重跑")
 
     # 結論
     print("\n" + "=" * 64)

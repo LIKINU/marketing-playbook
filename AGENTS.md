@@ -81,6 +81,27 @@
 
 ## 四點五、腳本（**強制層 —— 能跑代碼就必須用**）
 
+### ⛔ 出稿前第一步：組裝骨架（`composer.py` —— 真正的「skill」引擎）
+
+> **為什麼需要它**（用戶 2026-09-16 定調）：「模型根本做不了強制使用，它只做到讀取，相當於 prompt / RAG，不是 skill。」
+> → 所以**知識由腳本機械注入，不靠模型自願引用**。
+
+```bash
+python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5
+#  --tier  速览 | 标准 | G端
+```
+
+它做什麼（**確定性，非模型生成**）：
+1. 解析 `references/00-打法库.md` 全部 §X.Y 打法
+2. 按 `SKILL.md §二 狀況→打法 路由表`（編碼在 `scripts/knowledge_map.json`）匹配客戶狀況 → 選 3–7 條打法
+3. 自動拉取每條打法的**具體動作／驗收指標／可抄案例**
+4. **注入「理論依據」**：打法 → `knowledge_map.json` → `03` 模型碼 ＋ `49` 書籍
+5. 按檔位輸出骨架（`速览`／`标准`／`G端`）
+
+**產出 `skeleton.md`**：打法／理論依據／可抄案例**已注入**，模型只需補 `【填】` 處 → 交付前 `selfcheck` 第【8】關再校驗。**知識刪不掉。**
+
+> 逐步操作手冊見 `references/09-操作流程SOP.md`。映射改動改 `scripts/knowledge_map.json`（**不要寫在文字裡——模型不會看**）。
+
 ### ⛔ 唯一出稿入口：`run_pipeline.py`
 
 **交付物只能由 `scripts/run_pipeline.py` 產出。** 它不是「建議」，是唯一路徑：
@@ -157,7 +178,8 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
-| `scripts/` | **腳本強制層**：**`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按范本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `scripts/` | **腳本強制層**：**`composer.py`（組裝引擎·知識機械注入）＋ `knowledge_map.json`（映射表）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按范本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `references/09-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
 | `references/00-打法库.md` | 104 條打法（狀況 → 打法） | **生成方案時最先讀** |

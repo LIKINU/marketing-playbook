@@ -139,6 +139,13 @@ def main():
             f"若為完整版則需補上"
         )
 
+    # 1b) composer 骨架占位符殘留 —— 硬錯誤（未填完的骨架不得交付）
+    fill_cnt = len(re.findall(r"【填】", text))
+    if not quiet:
+        print(f"  {'✅' if fill_cnt < 3 else NG} composer 占位符【填】殘留：{fill_cnt} 處（<3 視為已填完）")
+    if fill_cnt >= 3:
+        hard_errors.append(f"方案殘留 {fill_cnt} 處 composer 占位符【填】 —— 骨架未填完，不得交付")
+
     # 2) 交付自檢單（協議 3：可寫進文檔附件，也可只在聊天回覆輸出 → 缺失僅警告，不攔）
     has_checklist = ("自檢單" in text or "自检单" in text)
     box_count = len(re.findall(r"[✅❌]", text))

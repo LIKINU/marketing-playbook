@@ -158,6 +158,7 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 | 門禁答案質量（過短／籠統） | `scripts/gate_check.py` 的 `MIN_LEN` |
 | 多 Agent 分工校驗 | `scripts/role_check.py` |
 | 案例庫體檢（禁公司背景） | `python scripts/case_lint.py`（`--max` 設上限） |
+| 案例庫清理 | `python scripts/case_clean.py --apply --scope identity`（先 `--dry-run` 看；finance 範圍會毀句，預設不動） |
 | **改完任何腳本 → 回歸驗證** | `python scripts/smoke_test.py`（一條命令跑 12 項：該過的過、該攔的攔） |
 
 **改完必做雙向驗證**：① 標杆範文 `selfcheck` 過（exit 0）② 造一份違規稿 `selfcheck` 攔（exit 1）。

@@ -19,6 +19,7 @@
 """
 
 import json
+import os
 import re
 import sys
 
@@ -296,6 +297,108 @@ def main():
         if not quiet:
             print(f"  {WARN} 未引用案例庫可抄案例")
         warnings.append("打法組合表建議加「可抄案例」列（引用 cases/01–49 的具體卡片）——611 張卡應被調用")
+
+    # 8) 知識庫強制引用（2026-09-16 新增：對齊 SKILL.md 第 2 篇「知識庫強制引用」callout）
+    #    根因：SKILL.md 文字層早已要求引用 打法庫/03/49，但生成時常被整篇忽略，
+    #    造成「skills 有很多內容但沒運用到策劃」——本塊把它變成機械硬門檻（不通過＝不出稿）。
+    if not quiet:
+        print("\n【8】知識庫強制引用（打法庫 §X.X ／ 03 模型 ／ 49 學者《書名》）")
+
+    _ref_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references")
+    _m03 = os.path.join(_ref_dir, "03-方法论操作手册.md")
+
+    # 8.0 讀 03 模型碼集合（用來確認引用的是真模型，不是自己編的碼）
+    valid_codes = set()
+    if os.path.exists(_m03):
+        try:
+            _t = read(_m03)
+            for _m in re.findall(r"^###\s*([A-Ma-m]\d{1,2})[｜|·\s]", _t, flags=re.M):
+                valid_codes.add(_m.upper())
+        except Exception:
+            pass
+    if not valid_codes and not quiet:
+        print(f"  {WARN} 找不到 {_m03}，改為僅查格式（不驗證模型碼真偽）")
+
+    def _find_codes(t):
+        raw = re.findall(r"03\s*[·§]?\s*([A-Ma-m]\d{1,2})", t)
+        raw += re.findall(r"[（(]\s*模型\s*([A-Ma-m]\d{1,2})", t)
+        raw += re.findall(r"[（(]\s*([A-Ma-m]\d{1,2})\s*[）)]", t)
+        codes = {c.upper() for c in raw}
+        if valid_codes:
+            codes &= valid_codes
+        return codes
+
+    # 8a 每條打法必須掛 打法庫 §X.X
+    play_blocks = re.split(r"(?m)^\*\*打法\s*\d+", text)
+    if len(play_blocks) > 1:
+        missing_lib = 0
+        for blk in play_blocks[1:]:
+            if not re.search(r"打法[庫库]\s*§\s*\d+\.\d+", blk):
+                missing_lib += 1
+        if missing_lib == 0:
+            if not quiet:
+                print(f"  {OK} 每條打法均掛 打法庫 §X.X 引用（{len(play_blocks)-1} 條）")
+        else:
+            if not quiet:
+                print(f"  {NG} 有 {missing_lib} 條打法未掛 打法庫 §X.X 引用")
+            hard_errors.append(
+                f"打法組合中有 {missing_lib} 條未引用 00-打法库 §X.X —— 每條打法必須從打法庫拉出具體做法（SKILL.md 第 2 篇）"
+            )
+    else:
+        if not quiet:
+            print(f"  {WARN} 未找到「**打法 N」分段，跳過打法庫引用校驗")
+        warnings.append("未找到打法組合分段，無法校驗「每條打法掛打法庫 §X.X」")
+
+    # 8b 策略篇 ≥3 個 03 模型碼（按「策略」章標題切，兼容完整版/精煉版的不同編號）
+    _ms = re.search(r"^#{1,4}\s*[^\n]*策略(.*?)(?=^#{1,2}\s*[^\n]*定位|\Z)", text, flags=re.S | re.M)
+    _strat = _ms.group(1) if _ms else text
+    _scodes = _find_codes(_strat)
+    if len(_scodes) >= 3:
+        if not quiet:
+            print(f"  {OK} 策略篇引用 {len(_scodes)} 個 03 模型（{', '.join(sorted(_scodes)[:8])}…）")
+    else:
+        if not quiet:
+            print(f"  {NG} 策略篇只引用 {len(_scodes)} 個 03 模型（需 ≥3）")
+        hard_errors.append(
+            f"策略篇引用 03 模型不足（{len(_scodes)}/3）——必須標明出處引用 ≥3 個 03-方法论操作手册 模型（如「場景方法論（03 §G3）」）"
+        )
+
+    # 8c 全文 ≥1 處 49 學者 / 《書名》（排除內部文檔名稱，如《任務規則表》《交付自檢單》）
+    _block_book = ("規則表", "规则表", "自檢單", "自检单", "規則", "规则")
+    _books = [b for b in re.findall(r"《[^》]{1,40}》", text) if not any(x in b for x in _block_book)]
+    if _books:
+        if not quiet:
+            print(f"  {OK} 引用書籍/學者 {len(_books)} 處（如 {_books[0]}）")
+    else:
+        if not quiet:
+            print(f"  {NG} 全文未引用任何 49 學者觀點或《書名》")
+        hard_errors.append(
+            "未引用任何 49-營銷書籍與作者 觀點（需 ≥1 處，如「《定位》（里斯&特勞特，49）」）"
+        )
+
+    # 8d 第三篇 定位 ≥2 個定位/品牌理論（按「定位與口徑」章標題切，兼容繁/簡與不同編號）
+    _mp = re.search(r"^#{1,4}\s*[^\n]*定位[與与]口[徑径](.*?)(?=^#{1,2}\s|\Z)", text, flags=re.S | re.M)
+    _pos = _mp.group(1) if _mp else ""
+    _pos_kw = ["定位", "品牌資產", "品牌资产", "視覺錘", "视觉锤", "超級符號", "超级符号",
+               "USP", "獨特賣點", "独特卖点", "品類", "心智", "里斯", "特勞特", "凱勒",
+               "華與華", "馮衛東", "江南春", "CBBE", "對立定位", "場景"]
+    _pos_codes = _find_codes(_pos) if _pos else set()
+    _pos_rel = (_pos_codes & {f"B{i}" for i in range(1, 10)}) | (_pos_codes & {"C1", "C12", "A8", "G7", "G4", "B5", "B8"})
+    _signals = set(_pos_rel)
+    _signals |= {k for k in _pos_kw if k in _pos}
+    if _pos and len(_signals) >= 2:
+        if not quiet:
+            print(f"  {OK} 第三篇含定位/品牌理論引用（{len(_signals)} 個信號：{', '.join(sorted(_signals)[:6])}…）")
+    elif _pos:
+        if not quiet:
+            print(f"  {NG} 第三篇定位理論引用不足（需 ≥2 個定位/品牌理論）")
+        hard_errors.append(
+            "第三篇 定位與口徑 未引用 ≥2 個定位/品牌理論（如 03 §B5 四種定位法、《定位》里斯&特勞特、03 §C1 超級符號）"
+        )
+    else:
+        if not quiet:
+            print(f"  {WARN} 未找到第三篇定位章節，跳過")
+        warnings.append("未找到第三篇 定位與口徑，無法校驗定位理論引用")
 
     # 結論
     print("\n" + "=" * 64)

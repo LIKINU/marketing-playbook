@@ -133,40 +133,90 @@ def _cards():
     return out
 
 
+def _universe():
+    """卡片宇宙 —— **必须与 picker 操作的对象一致**。
+
+    第一版這裡數的是 `### 3.N` 深度卡（609 張），而 `composer.parse_cards` 操作的是
+    「案例清單條目 ∪ 深度卡」（約 983 條）→ **兩個分母對不上，覆蓋率算出來是假的**。
+    （這正是本腳本要防的那類錯：指標與被測對象不一致。）
+    """
+    sys.path.insert(0, HERE)
+    import composer as C
+    uni = set()
+    for f in sorted(glob.glob(os.path.join(CASES, "*.md"))):
+        b = os.path.basename(f)
+        if not re.match(r"\d", b):
+            continue
+        for c in C.parse_cards("cases/" + b):
+            base = re.split(r"[｜|（(]", c["brand"])[0].strip()
+            if base:
+                uni.add((b, base))
+    return uni
+
+
 def l23(quiet):
-    """回傳（能指到卡片的打法數, 打法總數, 被指到的卡片數, 卡片總數, 斷點清單）"""
+    """L2 斷鏈類：每條打法都要「引用行 = 實際取得到的卡」；
+    L3 覆蓋率類：把 **每一條打法 × 每一個行業檔** 都跑一次 pick_cards，
+                 其中「**空手**的組合」才是斷鏈，「含本行業卡的組合」是品質指標。
+
+    回傳 (l2_breaks, plays_total, l3_zero, l3_pairs, l3_ind_ok, covered, universe)
+    """
     sys.path.insert(0, HERE)
     import composer as C
     C.load_model_names(MANUAL03)
     plays = _parse_plays()
-    cards = _cards()
-    ok, broken = 0, []
-    hit_cards = set()
+    all_files = [os.path.basename(f) for f in sorted(glob.glob(os.path.join(CASES, "*.md")))
+                 if re.match(r"\d", os.path.basename(f))]
+
+    broken, mismatch = [], []
     for pid, info in plays.items():
         line = info["case_line"]
         if not line:
             broken.append((pid, info["name"], "無 `**案例**` 行"))
             continue
         files = re.findall(r"`?(cases/\d{2}-[^`\s（(]+\.md)`?", line)
-        p = {"name": info["name"], "cases": files, "cases_raw": line}
-        picks = C.pick_cards(p, "", limit=1) if files else []
-        if picks:
-            ok += 1
-            for cf, c in C.pick_cards(p, "", limit=3):
-                hit_cards.add((os.path.basename(cf), c["brand"]))
-        else:
-            broken.append((pid, info["name"], line[:60]))
+        p = {"id": pid, "name": info["name"], "cases": files, "cases_raw": line,
+             "situation": ""}
+        if not C.pick_cards(p, "", limit=1):
+            broken.append((pid, info["name"], "取不到任何指名卡片"))
+            continue
+        declared = [kw for cf, kw in C.case_pairs(line)]
+        got = [re.split(r"[｜|（(]", c["brand"])[0].strip()
+               for cf, c in C.pick_cards(p, "", limit=9)]
+        miss = [d for d in declared
+                if not any(d[:4] in g or g[:4] in d for g in got)]
+        if miss:
+            mismatch.append((pid, info["name"], miss, got))
+
+    zero, ind_ok, covered = 0, 0, set()
+    for pid, info in plays.items():
+        files = re.findall(r"`?(cases/\d{2}-[^`\s（(]+\.md)`?", info["case_line"])
+        p = {"id": pid, "name": info["name"], "cases": files,
+             "cases_raw": info["case_line"], "situation": ""}
+        for ind in all_files:
+            got = C.pick_cards_ex(p, ind, limit=2)
+            if not got:
+                zero += 1
+                continue
+            if any(os.path.basename(cf) == ind for cf, c, _ in got):
+                ind_ok += 1
+            for cf, c, _ in got:
+                covered.add((os.path.basename(cf),
+                             re.split(r"[｜|（(]", c["brand"])[0].strip()))
+
+    uni = _universe()
+    pairs = len(plays) * len(all_files)
     if not quiet:
-        print(f"  L2 打法 → 案例：{len(plays)} 條打法，**只 {ok} 條指得出具體卡片**"
-              f"（{ok / max(len(plays), 1) * 100:.0f}%），斷點 {len(broken)} 條")
-        print(f"  L3 案例 → 打法：{len(cards)} 張卡，**只 {len(hit_cards)} 張被至少一條打法指到**"
-              f"（{len(hit_cards) / max(len(cards), 1) * 100:.1f}%）")
-        if not quiet:
-            for pid, name, why in broken[:12]:
-                print(f"     ✗ §{pid} {name} —— {why}")
-            if len(broken) > 12:
-                print(f"     …另有 {len(broken) - 12} 條")
-    return len(broken), len(plays), len(cards) - len(hit_cards), len(cards)
+        print(f"  L2 打法 → 案例：{len(plays)} 條打法，取不到卡片的 {len(broken)} 條；"
+              f"**引用行與實際取到的卡不一致的 {len(mismatch)} 條**")
+        for pid, name, why in broken[:10]:
+            print(f"     ✗ §{pid} {name} —— {why}")
+        for pid, name, miss, got in mismatch[:10]:
+            print(f"     ✗ §{pid} {name}：宣稱 {miss} ≠ 實得 {got}")
+        print(f"  L3 打法 × 行業（{len(plays)} × {len(all_files)} = {pairs} 組）："
+              f"**空手 {zero} 組**｜含本行業卡 {ind_ok} 組（{ind_ok / max(pairs, 1) * 100:.0f}%）｜"
+              f"覆蓋卡片 {len(covered)}/{len(uni)}")
+    return len(broken) + len(mismatch), len(plays), zero, pairs, ind_ok, len(covered), len(uni)
 
 
 # ── L4：交付物注入（實跑 composer，數真實內容 vs 占位符）──────
@@ -213,13 +263,32 @@ def l5(quiet):
     dead = sorted(used - m03)
     unused = len(m03 - used)
     total_models = len(m03)
+    # **2026-09-17 補：「被 JSON 引用」≠「挑得到」。**
+    #   實測接入 33 個模型後仍只有 14 個能被 theory_for 選中 ——
+    #   因為 major_theory 每類只取前 3，多數模型永遠浮不上來。
+    #   所以真正的指標是**可達率**：把所有打法的 theory_for 跑一遍，看哪些模型從未出現。
+    sys.path.insert(0, HERE)
+    import composer as C
+    _km = json.loads(read(KMAP))          # 只讀一次（寫在迴圈裡會讀 104 次盤，×50 遍直接拖死）
+    reach = set()
+    for pid, info in _parse_plays().items():
+        major = int(pid.split(".")[0])
+        p = {"id": pid, "name": info["name"], "situation": "",
+             "major": major, "cases": [], "cases_raw": ""}
+        ms, _ = C.theory_for(p, _km)
+        reach |= set(ms)
+    unreachable = sorted(m03 - reach)
     if not quiet:
         print(f"  L5 模型 → 打法：03 手冊 {len(m03)} 個模型；映射表引用 {len(used)} 個；"
               f"**死條目 {len(dead)} 個**（引用但手冊裡不存在）")
         if dead:
             print(f"     ✗ 死條目：{'、'.join(dead[:20])}")
-        print(f"     （另有 {unused} 個模型在映射表裡從未被用到 —— 這是覆蓋率缺口，不算斷鏈）")
-    return len(dead), total_models, unused
+        print(f"     **能被 theory_for 挑中的：{total_models - len(unreachable)}/{total_models}**"
+              f"（映射表未引用的 {unused} 個；引用了但挑不到的 {len(unreachable) - unused} 個）")
+        if unreachable:
+            print(f"     ✗ 永遠挑不到：{'、'.join(unreachable[:24])}")
+    # 斷鏈＝死條目（引用不存在的碼）＋ 永遠挑不到（引用了卻浮不上來）
+    return len(dead) + len(unreachable), total_models, unused
 
 
 # ── L7：私有痕跡掃描（公開倉庫紅線）──────────────────────────
@@ -291,7 +360,7 @@ def main():
     print("=" * 68)
 
     f1, t1 = l1(q)
-    f2, t2, f3, t3 = l23(q)
+    f2, t2, z3, tp3, i3, cov3, t3 = l23(q)
     if a.no_compose:
         f4, inj = 0, -1
         if not q:
@@ -310,14 +379,17 @@ def main():
     # 會讓審計永遠紅燈，久了就沒人看（這正是上一輪「綠燈但其實斷了」的反面陷阱）。
     rows = [
         ("L1 檔案引用可解析", f1, t1),
-        ("L2 打法→案例 可達", f2, t2),
+        ("L2 打法→案例（含「引用行＝實取」一致）", f2, t2),
+        ("L3 (打法×行業) 空手的組數", z3, tp3),
         ("L4 交付物占位符", f4, inj),
         ("L6 既有校驗未通過", f6, t6),
         ("L7 私有痕跡（公開倉庫紅線）", f7, t7),
     ]
     covered = [
-        ("L3 案例被打法引用（覆蓋率，非要求）", t3 - f3, t3),
+        ("L3 含本行業卡的組數（品質指標）", tp3 - i3, tp3),
+        ("L3 覆蓋到的卡片數（覆蓋率）", t3 - cov3, t3),
         ("L5 模型未被映射表用到（覆蓋率，非要求）", unused5, t5),
+        ("L5 模型能被挑中（可達率，越高越好）", 0, t5),
     ]
     total_bad = sum(x[1] for x in rows)
     for name, bad, tot in rows:

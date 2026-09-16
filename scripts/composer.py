@@ -210,26 +210,38 @@ def select_plays(plays, gate, kmap, top, cardpoints):
 # 4. 注入「理論依據」：打法 → 03 模型碼 / 49 書籍（確定性映射）
 # ─────────────────────────────────────────────────────────────
 def theory_for(play, kmap):
-    ov = None
+    """這條打法的「理論依據」＝ **override 優先 ＋ 章內相關度補位**。
+
+    ⚠️ 2026-09-17 改成「可累加」：第一版的 override 是**整組替換** ——
+    那表示只要給某條打法加一個新模型，就會把它原本對的模型全擠掉。
+    改成累加後，才能安全地把 03 手冊裡原本挑不到的模型逐條綁進具體打法
+    （否則「接進 major_theory」只是讓 JSON 好看，`theory_for` 每類只取 3 個，
+     多數模型永遠浮不上來 —— 實測：接入 33 個後仍只有 14 個能被挑中）。
+    """
+    # ⚠️ 2026-09-17 修：第一版取「第一個命中的 key」，而字典裡有個 2 字符的舊鍵 `'VI'`
+    #    會先把 `'VI 一致性'` 擋掉（短鍵遮蔽長鍵）。改成**最長鍵優先**，
+    #    與 `infer_industry()` 的規則一致 —— 越長＝越具體＝越該贏。
+    ov, best_len = None, -1
     for key in kmap["play_overrides"]:
-        if key in play["name"]:
-            ov = kmap["play_overrides"][key]
-            break
+        if key in play["name"] and len(key) > best_len:
+            ov, best_len = kmap["play_overrides"][key], len(key)
     major = kmap["major_theory"].get(str(play["major"]), {})
-    if ov:
-        models, books = list(ov["models"]), list(ov["books"])
-    else:
-        # 章內按「模型名 ↔ 打法名／適用狀況」的字面相關度挑 3 個（比固定取首/中/末貼切）
-        cm = list(major.get("models", []))
-        bg = bigrams(play["name"] + play.get("situation", ""))
+    priority = list(ov["models"]) if ov else []
+    cm = list(major.get("models", []))
+    bg = bigrams(play["name"] + play.get("situation", ""))
 
-        def _rel(code):
-            nm = _M03_RE.get(code.upper(), "")
-            return len(bigrams(nm) & bg) if nm else 0
+    def _rel(code):
+        nm = _M03_RE.get(code.upper(), "")
+        return len(bigrams(nm) & bg) if nm else 0
 
-        cm = sorted(cm, key=lambda c: (-_rel(c), c))
-        models = cm[:3] if len(cm) >= 3 else cm
-        books = list(major.get("books", []))[:2]
+    rest = sorted([c for c in cm if c not in priority], key=lambda c: (-_rel(c), c))
+    # override 是**人手明確指定的**，那就全部給出來（不足 3 個再用章內相關度補位）——
+    # 若同樣套 [:3]，被 append 到既有清單尾端的模型會永遠浮不上來
+    # （實測：接入 33 個模型後 I5 就是這樣一直挑不到）。
+    models = priority + rest[:max(0, 3 - len(priority))]
+    books = list(ov["books"]) if ov else list(major.get("books", []))
+    if not ov:
+        books = books[:2]
     return models, books
 
 
@@ -346,30 +358,47 @@ def parse_cards(cases_file):
             for mm in re.finditer(r"(?m)^###\s+3\.\d+\s+(.+?)\s*$", t):
                 out.append({"brand": mm.group(1).strip(), "one": "", "what": "",
                             "result": "", "points": ""})
+        else:
+            # **2026-09-17 新增：清單 ∪ 深度卡**。
+            #    實測 25 個檔裡有 **48 張深卡不在自己的案例清單裡** ——
+            #    只讀清單的 Agent 永遠看不到它們，composer 也引用不到。
+            #    這裡把「只在深度拆解」的卡一併收進來（標 deep_only 供溯源）。
+            have = {re.split(r"[｜|（(]", c["brand"])[0].strip() for c in out}
+            for mm in re.finditer(r"(?m)^###\s+3\.\d+\s+(.+?)\s*$", t):
+                title = mm.group(1).strip()
+                base = re.split(r"[｜|（(]", title)[0].strip()
+                if base and not any(base == h or base.startswith(h) or h.startswith(base)
+                                    for h in have if h):
+                    out.append({"brand": title, "one": "", "what": "", "result": "",
+                                "points": "", "deep_only": True})
+                    have.add(base)
     _CARDS[cases_file] = out
     return out
 
 
-def hint_candidates(hint):
-    """從打法的 `**案例**` 行抽出「可用來對卡片標題的品牌候選」。
+def case_pairs(hint):
+    """把 `**案例**` 行拆成 **[(檔名, 品牌關鍵詞)]** —— 保留「品牌屬哪一檔」的對應。
 
-    為什麼要抽「前綴」：案例行寫的是描述句——「瑞幸 × 茅台醬香拿鐵，2023」、
-    「成分黨口播帳號開頭結構」——而卡片標題是「瑞幸 × 貴州茅台｜醬香拿鐵（2023）」。
-    整串比對命中率只有 1.8%（2026-09-17 實測）；切成 2–6 字前綴後升到 31%，
-    且抽樣檢查全部正確（超級符號→蜜雪冰城、品牌諺語→王老吉、包裝即媒體→農夫山泉…）。
-    **抽不出來的部分一律進「知識庫缺口」，不硬湊。**
+    為什麼一定要保留對應（2026-09-17）：第一版只抽出「品牌候選集」，
+    再對**每一個被引用的檔**都做一次子串匹配 → 同一個品牌會從多檔各中一次
+    （實測：淄博燒烤、石頭科技、瑞幸 各被抽出兩份），引用行與實際取到的卡不一致。
     """
-    names = []
-    for m in re.finditer(r"[（(]([^）)]*)[）)]", hint or ""):
-        p = re.sub(r"^[（(]|[）)]$", "", m.group(1).strip())
-        for x in re.split(r"[、；，,]", p):
+    out = []
+    for m in re.finditer(r"`(cases/\d{2}-[^`]+\.md)`\s*[（(]([^）)]*)[）)]", hint or ""):
+        cf, inner = m.group(1), m.group(2)
+        for x in re.split(r"[、；，,]", inner):
             x = re.sub(r"[「『].*$", "", x.strip()).strip()
             x = re.sub(r"\d{4}\s*年.*$", "", x).strip()
             if x:
-                names.append(x)
+                out.append((cf, x))
+    return out
+
+
+def hint_candidates(hint):
+    """從打法的 `**案例**` 行抽出**品牌前綴候選**（跨檔合集；僅用於粗篩，正取用 case_pairs）。"""
     out = []
-    for n in names:
-        for part in re.split(r"[×xX]|\s+", n):
+    for _, x in case_pairs(hint):
+        for part in re.split(r"[×xX]|\s+", x):
             part = part.strip()
             for k in range(len(part), 1, -1):
                 if 2 <= k <= 6:
@@ -382,32 +411,85 @@ def hint_candidates(hint):
     return uniq
 
 
-def pick_cards(play, ind, limit=2):
-    """挑可抄案例 —— **严格模式（2026-09-17 修正）**。
+def pick_cards_ex(play, ind, limit=2):
+    """挑可抄案例 —— **两段式（2026-09-17 第二版）**，回 `[(file, card, 來源)]`。
 
-    只認「打法自己的 `**案例**` 行裡**指名**的品牌」。指不出來就回空，
-    **絕不回落成「那個檔的第一張卡」** —— 否則會給出錯誤關聯
-    （實測踩過：§4.1「包裹卡引流」的案例行只寫「食品品牌的包裹卡引流」，
-     舊邏輯回落到 `cases/02` 的第一張卡 = 王老吉，與包裹卡毫無關係）。
-    寧可空着讓 composer 把它列進「知識庫缺口」，也不要假引用。
+    第一段（精准）：打法 `**案例**` 行**指名**的品牌。指不出来就空着，
+    **绝不回落成「那个档的第一张卡」**（旧逻辑实测踩过：§4.1「包裹卡引流」的案例行
+    只写「食品品牌的包裹卡引流」，回落成 `cases/02` 第一张卡 = 王老吉，与包裹卡毫无关系）。
+
+    第二段（**行业适配**，2026-09-17 新增）：若还不足 limit，就从**客户所在行业档**
+    （`ind`）里挑一张与这条打法语义最接近的卡。为什么必须加这一段：
+    没有它，一个银发养老的客户会被配上美妆／茶饮的例子 ——
+    **「可抄案例」不可抄，等于没有案例。**
     """
     hint = play.get("cases_raw", "")
-    cands = hint_candidates(hint)
+    pairs = case_pairs(hint)
     picks, seen = [], set()
-    for cf in play.get("cases", []):
+    # **配額設計（2026-09-17）**：給了行業檔時，答案要「1 張精準對標 ＋ 1 張本行業可抄」。
+    #   全給指名卡 → 銀發客戶拿到美妝例子（不可抄）；全給行業卡 → 失去跨行業標桿。
+    #   所以指名段最多佔 limit-1，最後一格一定留給客戶所在行業。
+    named_quota = max(1, limit - 1) if ind else limit
+    for cf, kw in pairs:
         for c in parse_cards(cf):
             base = re.split(r"[｜|（(]", c["brand"])[0].strip()
-            if base and any(x in base for x in cands) and (cf, base) not in seen:
-                seen.add((cf, base))
-                picks.append((cf, c))
+            if base and kw in c["brand"] and base not in seen:
+                seen.add(base)                       # ← 以品牌去重，跨檔也不會重複
+                picks.append((cf, c, "指名"))
+                break                                # 每個（檔, 品牌）只取首次出現那張
+        if len(picks) >= named_quota:
+            break
+    if ind and len(picks) < limit:
+        for cf, c in best_cards_for_play(ind, play, (limit - len(picks)) + 2):
+            base = re.split(r"[｜|（(]", c["brand"])[0].strip()
+            if base not in seen:
+                seen.add(base)
+                picks.append((cf, c, "行業適配"))
+                if len(picks) >= limit:
+                    break
     return picks[:limit]
+
+
+def pick_cards(play, ind, limit=2):
+    """兼容層：只回 (file, card) 兩元組。"""
+    return [(cf, c) for cf, c, _ in pick_cards_ex(play, ind, limit)]
+
+
+def has_named_case(play):
+    """這條打法的 `**案例**` 行**指名**了品牌嗎（第一段能不能取到東西）。"""
+    return bool(pick_cards_ex(play, "", limit=1))
+
+
+_PLAY_BG = None
+
+
+def best_cards_for_play(ind, play, n=1):
+    """从某个行业档里，按 bigram 重叠挑与这条打法最贴近的卡（确定性、可复现）。"""
+    global _PLAY_BG
+    cards = parse_cards(ind)
+    if not cards:
+        return []
+    if _PLAY_BG is None:
+        _PLAY_BG = {}
+    key = (ind, play.get("id", ""), play["name"])
+    q = bigrams(play["name"] + play.get("situation", ""))
+    scored = []
+    for c in cards:
+        txt = c["brand"] + " " + (c.get("one") or "") + " " + (c.get("points") or "") + " " + (c.get("what") or "")
+        g = bigrams(txt[:300])
+        if not g:
+            continue
+        scored.append((len(q & g) / max(len(q | g), 1), c))
+    scored.sort(key=lambda x: (-x[0], x[1]["brand"]))
+    _PLAY_BG[key] = scored
+    return [(ind, c) for ov, c in scored[:n] if ov > 0]
 
 
 def uncovered_plays(plays, ind):
     """回傳「案例行指不出任何可引用卡片」的打法清單（給骨架列出待補項）。"""
     out = []
     for p in plays:
-        if not pick_cards(p, ind, limit=1):
+        if not has_named_case(p):
             why = ("案例行未指名品牌" if p.get("cases") else "無案例行")
             out.append((p, why))
     return out
@@ -481,9 +563,13 @@ def play_block(i, p, kmap, ind=""):
     # 2026-09-17：理論依據不再只給編號 —— 附上「解決什麼問題 ＋ 前幾步」
     mtxt = "；".join(model_brief(c, 2) for c in models)
     btxt = "、".join(_book(b) for b in books)
-    picks = pick_cards(p, ind)
-    cases = ("　".join(card_line(cf, c) for cf, c in picks) if picks
-             else "**（无）** —— 本条打法的 `**案例**` 行未指名品牌，见 §2.0.2 待补清单")
+    picks = pick_cards_ex(p, ind)
+    if picks:
+        cases = "　".join(
+            card_line(cf, c) + ("〔指名〕" if src == "指名" else "〔本行业〕")
+            for cf, c, src in picks)
+    else:
+        cases = "**（无）** —— 本条打法在本行业档里也找不到可用卡片，见 §2.0.2 待补清单"
     # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
     steps = parse_steps(p["howto"])
     if steps:
@@ -523,8 +609,9 @@ def build_lite(rules, plays, kmap, cardpoints, today):
         models, books = theory_for(p, kmap)
         steps = parse_steps(p["howto"])[:3]
         s = "；".join(f"{k}) {a}" for k, (a, _) in enumerate(steps, 1))
-        picks = pick_cards(p, ind, limit=1)
-        cl = f"　★ 可抄：{card_line(picks[0][0], picks[0][1], 180)}" if picks else ""
+        picks = pick_cards_ex(p, ind, limit=1)
+        cl = (f"　★ 可抄({picks[0][2]})：{card_line(picks[0][0], picks[0][1], 180)}"
+              if picks else "")
         lines.append(
             f"**{i}. {p['name']}**（打法库 §{p['id']}）—— {p['situation']}\n"
             f"- 怎么打：{s or FILL}\n"
@@ -580,11 +667,11 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     strategy += "".join(play_block(i + 1, p, kmap, ind) + "\n" for i, p in enumerate(plays))
     strategy += "### 2.0.1 可抄案例（已注入卡片内容 —— 别人是怎么做的）\n"
     for i, p in enumerate(plays):
-        picks = pick_cards(p, ind, limit=2)
+        picks = pick_cards_ex(p, ind, limit=2)
         if picks:
             strategy += f"- **打法 {i+1}（{p['name']}）**：\n"
-            for cf, c in picks:
-                strategy += f"  - {card_line(cf, c, 320)}\n"
+            for cf, c, src in picks:
+                strategy += f"  - {card_line(cf, c, 320)}〔{src}〕\n"
                 if c.get("points"):
                     strategy += f"    - 可抄的點：{c['points'][:200]}\n"
             strategy += f"    - **我们怎么用**：{FILL}（面对的问题／我们改哪一步／预期结果）\n"

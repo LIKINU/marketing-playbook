@@ -586,7 +586,7 @@ python scripts/run_pipeline.py --rules rules.json --plan 方案-按範本.md \
 ## 四、參考文件索引
 
 > **選檔看第 -1 步那張表**（含「明確不要讀」）。本節是**細節補充**：每份檔「必須引用什麼、內容是什麼」。
-> 目錄級導航：`references/README.md`（10 份工作檔）／`references/cases/README.md`（50 個行業檔只讀 1 個）。
+> 目錄級導航：`references/cases/README.md`（50 個行業檔只讀 1 個；含固定標題名與硬規則）。
 
 ### 生成時必須引用的三份（⛔ 不是「參考」，是「必須引用並標出處」）
 | 文件 | 什麼時候讀／怎麼用 |
@@ -826,6 +826,27 @@ python scripts/build_docx.py plan.md -o 方案.docx \
 - 客戶隱私：真實客戶名、聯絡方式、報價底線
 
 **合併後要做**：更新本文件 §四 索引（若新增文件）→ 更新 §八 變更記錄 → 舊內容過時則**升級替換**。
+
+### 改案例庫後的腳本鏈（順序很重要）
+
+```bash
+python scripts/file_meta.py                      # ⓪ 檔頭自解釋塊（改了章節後重跑，目錄行自動同步）
+python scripts/case_sections.py --fix            # ① 章節標題規範化（改標題後必跑）
+python scripts/case_order.py --fix               # ② 卡片要素順序（零刪除，帶不變式）
+python scripts/case_upgrade.py --list            # ③ 看還差多少（五要素齊 ＋ ≥2500 字）
+python scripts/case_lint.py                      # ④ 查「公司背景」違規（--strict 裸計數）
+python scripts/smoke_test.py                     # ⑤ 改過任何腳本後
+```
+
+> ⚠️ **改案例卡後必須跑 ① + ② + ③**。歷史上多次批量改造把「③ 做了什麼」搬到卡片最後、
+> 或把 `### 3.2` 標題的換行吞掉（變成 `---### 3.2`，讓它不再是一級標題）——**這類損壞肉眼很難發現**，
+> 靠 `case_order.py`／`case_sections.py` 的機械校驗 ＋ 硬不變式才能保證不丟內容。
+
+**⛔ 不寫進來的**：公司背景（創始人／成立年份／股權／融資／營收／人事）、未核實數據、客戶隱私。
+**原則**：增量續寫，不整篇覆蓋；同名迭代走**升級替換**，不版本堆疊。
+
+> 新增或改名任何檔 → **必須同步三處**：本文件 §四 索引、`references/cases/README.md`（若涉及案例檔）、
+> `AGENTS.md` §五 檔案地圖。
 
 ---
 

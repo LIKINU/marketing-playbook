@@ -590,7 +590,7 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
-    # 只管 01–45 行業檔：46–50（機構／書籍／出版物）用的是另一套槽位，
+    # 只管 01–45 行業檔：46–51（機構／書籍／出版物）用的是另一套槽位，
     # 沒有「本行業常見死法」這個語義位，不是缺口。
     fs = [f for f in sorted(glob.glob(os.path.join(CASES, "*.md")))
           if re.match(r"\d", os.path.basename(f))

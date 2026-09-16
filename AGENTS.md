@@ -87,7 +87,7 @@
 python scripts/flow.py --dir 案子目錄      # 告訴你「現在第幾步、下一步跑哪條命令」
 ```
 
-把 `references/09-操作流程SOP.md` 的九階段流程（S0 盤點 → S1 門禁 → … → S8 沉澱）
+把 `references/08-操作流程SOP.md` 的九階段流程（S0 盤點 → S1 門禁 → … → S8 沉澱）
 變成**可機械檢查的狀態機**：它看目錄裡的產物（`rules.json` / `skeleton.md` / `plan.md` / `*.docx`）
 自動判斷你卡在哪一步。
 
@@ -110,7 +110,7 @@ python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --
 
 **產出 `skeleton.md`**：打法／理論依據／可抄案例**已注入**，模型只需補 `【填】` 處 → 交付前 `selfcheck` 第【8】關再校驗。**知識刪不掉。**
 
-> 逐步操作手冊見 `references/09-操作流程SOP.md`。映射改動改 `scripts/knowledge_map.json`（**不要寫在文字裡——模型不會看**）。
+> 逐步操作手冊見 `references/08-操作流程SOP.md`。映射改動改 `scripts/knowledge_map.json`（**不要寫在文字裡——模型不會看**）。
 
 ### ⛔ 唯一出稿入口：`run_pipeline.py`
 
@@ -193,19 +193,19 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 |---|---|---|
 | `SKILL.md` | **唯一入口**：第 -1 步導航 + 門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
 | `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `knowledge_map.json`（映射表）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
-| `references/09-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
+| `references/08-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
 | `references/00-打法库.md` | 104 條打法（狀況 → 打法） | **生成方案時最先讀** |
-| `references/cases/01~50-{大類}.md` | **50 個大類 / 620 張深度案例卡**（01–45 行業 411 張 ＋ 46–50 機構 209 張） | 找同行參照案例時**只讀你客戶那 1 檔** |
+| `references/cases/01~51-{大類}.md` | **51 個大類 / 649 張深度案例卡**（01–45 行業 411 張 ＋ 46–51 機構與方法論 238 張） | 找同行參照案例時**只讀你客戶那 1 檔** |
 | `references/03-方法论操作手册.md` | **111 個模型（A–M）怎麼填** | 需要用具體模型時 |
 | `references/01-接案输出模板.md` | **逐章寫作指南**（目的／必含／寫法／範例／常見錯誤） | **寫方案時必讀** |
 | `references/02-多Agent分工简报.md` | 五份角色簡報 + 三種環境執行方式 + 裁決規則 | 多 Agent 分工時 |
 | `references/04-失败归因总库.md` | 12 個失敗模式（附錄另 5 個 AI 執行者模式）+ 34 條預演清單 | 方案風險自檢 |
 | `references/05-小企业与新品牌从零打造.md` | 小企業／新品牌主入口 | 客戶是小企業或新品牌 |
 | `references/cases/51-本土数字营销与MCN.md` | 平台官方模型（AIPL／FAST／5A／DEEPLINK） | 要用平台方法論時 |
-| `references/07-选流派矩阵与对照表.md` | 判斷外包還是自己幹 | 要決定分工邊界時 |
-| `references/08-质量范式-便利店开学季案.md` | ⭐ **質量標尺**：角色產出規格／骨架模板／可校驗指標 | 不確定「寫到什麼程度算夠」時 |
+| `references/06-选流派矩阵与对照表.md` | 判斷外包還是自己幹 | 要決定分工邊界時 |
+| `references/07-质量范式-便利店开学季案.md` | ⭐ **質量標尺**：角色產出規格／骨架模板／可校驗指標 | 不確定「寫到什麼程度算夠」時 |
 | `references/范例/` | 📄 **樣張（簡體）**：`-交付稿.md/.docx`、`-原版.md`、`-任务规则表.json`、`-预算表.json` | 想看成品／輸入文件長什麼樣時 |
 | ~~`references/archive/`~~ | **已退役（2026-09-16）**：內容併入 `cases/46-50` | — |
 

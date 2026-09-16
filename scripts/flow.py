@@ -4,7 +4,7 @@
 flow.py — 接案流程嚮導（marketing-playbook）
 
 作用：看一眼當前工作目錄，告訴你「現在在第幾步、下一步跑哪條命令」。
-      把 references/09-操作流程SOP.md 的流程變成**可被機械檢查的狀態機**。
+      把 references/08-操作流程SOP.md 的流程變成**可被機械檢查的狀態機**。
 
 用法：
     python scripts/flow.py                     # 看當前目錄

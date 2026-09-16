@@ -88,10 +88,12 @@ def strip_inline(s):
     舊版只去 **粗體**，於是 composer 注入的 `cases/xx.md` 反引號、*斜體*、[連結](url)
     會原樣留在 .docx 裡 —— 客戶看到一堆 `` ` ``。這裡一次清乾淨。
     """
+    s = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", s)               # ![alt](圖片) → alt 文字（Word 無圖）
     s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)                       # **粗體**
     s = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", s)          # *斜體*
     s = re.sub(r"`([^`]+)`", r"\1", s)                            # `行內碼`
     s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)                # [文字](連結)
+    s = s.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")  # HTML 換行
     return s
 
 
@@ -130,6 +132,20 @@ def render_markdown(doc, md_text):
         ln = lines[i]
         s = ln.strip()
 
+        # 圍欄程式碼塊 ``` … ```（舊版未識別 → 把 ``` 和塊內內容當普通文字，甚至把塊內 | 行當表格）
+        if s.startswith("```"):
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                p = doc.add_paragraph()
+                p.paragraph_format.left_indent = Cm(0.5)
+                p.paragraph_format.space_after = Pt(0)
+                r = p.add_run(lines[i].rstrip())
+                set_run_font(r, size=9, font="Consolas")
+                i += 1
+            if i < len(lines):
+                i += 1  # 跳過結尾 ```
+            continue
+
         # 表格
         if s.startswith("|") and i + 1 < len(lines) and re.match(r"^\|[-:\s|]+\|$", lines[i + 1].strip()):
             block = []
@@ -138,6 +154,9 @@ def render_markdown(doc, md_text):
             rows = parse_table_block(block)
             if rows:
                 ncol = max(len(r) for r in rows)
+                if ncol > 6:
+                    print(f"{WARN} 表格有 {ncol} 列（>6）—— SKILL 要求表格 ≤5 列，"
+                          f"寬表在 Word 會擠成一條豎線；建議改多段文字或拆表。")
                 t = doc.add_table(rows=0, cols=ncol)
                 t.style = "Table Grid"
                 for ri, row in enumerate(rows):
@@ -185,9 +204,12 @@ def render_markdown(doc, md_text):
             continue
 
         # 列表
-        if re.match(r"^[-*]\s+", s) or re.match(r"^\d+[.、)]\s+", s):
-            text = re.sub(r"^[-*]\s+|^\d+[.、)]\s+", "", s)
-            add_paragraph_with_bold(doc, "・" + text, size=10.5)
+        m_list = re.match(r"^(\s*)([-*]|\d+[.、)])\s+(.*)$", ln)
+        if m_list:
+            indent, text = len(m_list.group(1)), m_list.group(3)
+            p = add_paragraph_with_bold(doc, "・" + text, size=10.5)
+            if indent >= 2:   # 嵌套列表：按縮進層級縮排（舊版一律壓平）
+                p.paragraph_format.left_indent = Cm(0.5 * (indent // 2))
             i += 1
             continue
 

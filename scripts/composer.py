@@ -34,6 +34,7 @@ PLAYBOOK = os.path.join(REF, "00-打法库.md")
 KMAP = os.path.join(HERE, "knowledge_map.json")
 
 FILL = "【填】"
+WARN = "⚠️"
 
 
 def read(p):
@@ -452,7 +453,14 @@ def main():
     if not os.path.exists(a.rules):
         print(f"❌ 找不到规则表：{a.rules}")
         sys.exit(1)
-    rules = json.loads(read(a.rules))
+    try:
+        rules = json.loads(read(a.rules))
+    except Exception as e:
+        print(f"❌ 规则表不是合法 JSON：{e}")
+        sys.exit(1)
+    if not isinstance(rules, dict):
+        print("❌ 规则表顶层必须是 JSON 对象（{...}）")
+        sys.exit(1)
     kmap = json.loads(read(KMAP))
     load_model_names(os.path.join(REF, "03-方法论操作手册.md"))
     plays = parse_playbook(read(PLAYBOOK))
@@ -460,7 +468,13 @@ def main():
         print("❌ 解析 00-打法库 失败（0 条打法）")
         sys.exit(2)
 
-    cardpoints = infer_cardpoints(rules.get("gate", {}))
+    gate = rules.get("gate") or {}
+    if not isinstance(gate, dict) or not gate:
+        print(f"{WARN} 規則表缺少 gate（門禁內容）—— 打法匹配將退化成盲選；建議先跑 gate_check.py")
+    elif sum(len(str(v)) for v in gate.values()) < 40:
+        print(f"{WARN} gate 內容過短（<40 字）—— 匹配會不準，建議把門禁 13 項的客戶狀況補足")
+
+    cardpoints = infer_cardpoints(gate)
     picked = select_plays(plays, rules.get("gate", {}), kmap, a.top, cardpoints)
     md = build_skeleton(rules, picked, kmap, a.tier, cardpoints)
     with open(a.out, "w", encoding="utf-8") as f:

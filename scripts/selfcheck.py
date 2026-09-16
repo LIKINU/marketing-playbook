@@ -86,6 +86,12 @@ def read(path):
         return f.read()
 
 
+def emit_json(hard, warns, code):
+    """--json：給 CI／自動化消費的結構化輸出（優化項 2026-09-16）。"""
+    if "--json" in sys.argv:
+        print(json.dumps({"exit": code, "hard_errors": hard, "warnings": warns}, ensure_ascii=False))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     quiet = "--quiet" in sys.argv
@@ -139,6 +145,13 @@ def main():
             f"若為完整版則需補上"
         )
 
+    # 1a) 篇幅形狀（優化項）：太短基本是空殼（除非明確是「速覽版」）
+    _chars = len(re.sub(r"\s", "", body))
+    if not quiet:
+        print(f"  {'✅' if _chars >= 1500 else WARN} 正文非空白字數：{_chars:,}")
+    if _chars < 1500 and "速覽" not in text and "速览" not in text:
+        warnings.append(f"全文僅 {_chars} 字 —— 交付稿通常遠不止此，請確認不是空殼稿")
+
     # 1b) composer 骨架占位符殘留 —— 硬錯誤（未填完的骨架不得交付）
     fill_cnt = len(re.findall(r"【填】", text))
     if not quiet:
@@ -164,7 +177,8 @@ def main():
     #    build_docx 永久拒絕出稿（強制層反而變成阻塞層）。
     if not quiet:
         print("\n【3】內部過程文檔檢查（不得出現在正文；附件區除外）")
-    m_appendix = re.search(r"\n#{1,4}\s*(附件|附錄|附录)\s*[A-D]?\s*[:：·]?\s", text)
+    # 附件／附錄標題（允許行末無內容、允許「## 附件」這種寫法）
+    m_appendix = re.search(r"(?m)^#{1,4}\s*(附件|附錄|附录)\s*[A-D]?\s*[:：·]?", text)
     body_scope = text[:m_appendix.start()] if m_appendix else text
     leaks = sorted({k for k in INTERNAL_LEAK_HARD if k in body_scope})
     soft_leaks = sorted({k for k in INTERNAL_LEAK_SOFT if k in body_scope})
@@ -213,7 +227,15 @@ def main():
     # 粗略：把含「禁用詞/不能說/紅線」的段落挖掉再掃
     lines = text.splitlines()
     safe_idx = set()
+    in_code = False
     for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):     # 圍欄程式碼塊整段排除（範例／原文不該被當違規用語）
+            in_code = not in_code
+            safe_idx.add(i)
+            continue
+        if in_code:
+            safe_idx.add(i)
+            continue
         if any(c in ln for c in BANNED_CONTEXT_SAFE):
             for j in range(max(0, i - 2), min(len(lines), i + 3)):
                 safe_idx.add(j)
@@ -272,7 +294,10 @@ def main():
 
     # 7b 問題類型 A–H 歸類 —— 警告
     mt = re.search(r"問題類型|问题类型", text)
-    if mt and re.search(r"[A-H]", text[mt.start():mt.start() + 100]):
+    _type_names = ["认知", "認知", "交易", "渠道", "信任", "复购", "復購", "私域",
+                   "定价", "定價", "组织", "組織", "合规", "合規"]
+    # 收緊：除了「問題類型」附近有 A–H 字母，還必須真的提到某一類名（否則模型碼里的字母會誤命中）
+    if mt and re.search(r"[A-H]", text[mt.start():mt.start() + 120]) and any(n in text for n in _type_names):
         if not quiet:
             print(f"  {OK} 問題類型已歸類（A–H）")
     else:
@@ -303,7 +328,7 @@ def main():
     else:
         if not quiet:
             print(f"  {WARN} 未引用案例庫可抄案例")
-        warnings.append("打法組合表建議加「可抄案例」列（引用 cases/01–49 的具體卡片）——611 張卡應被調用")
+        warnings.append("打法組合建議加「可抄案例」（引用 cases/01–50 的具體卡片）——628 張卡應被調用")
 
     # 7e 每條打法的「具體動作」須精準到每一步（≥3 個編號步驟）—— 硬錯誤
     #    用戶 2026-09-16：「策劃具體操作流程還是沒寫好，要詳細精準到每一步 —— 指策劃案的打法和實操」
@@ -449,6 +474,7 @@ def main():
             for w in warnings:
                 print(f"   · {w}")
         print("\n→ 修正硬錯誤後重跑。**不得宣告交付**（協議 3）。")
+        emit_json(hard_errors, warnings, 1)
         sys.exit(1)
 
     print(f"{OK} 自檢通過（硬錯誤 0 項）。")
@@ -457,6 +483,7 @@ def main():
         for w in warnings:
             print(f"   · {w}")
     print("\n→ 請把 12 項《交付自檢單》原樣輸出在交付回覆中（協議 3）。")
+    emit_json([], warnings, 0)
     sys.exit(0)
 
 

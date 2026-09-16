@@ -225,24 +225,23 @@ def main():
     print(f"\n✅ 索引已寫入 {os.path.relpath(OUT_JSON, ROOT)}")
 
     # ── 打標
+    #    先**剝掉所有舊標**再重打 —— 因為標裡的文字（打法名、覆蓋率提示）會隨
+    #    00-打法库 的修復而變化，「下一行已有標就跳過」會讓舊標永遠留著（第一版就這樣）。
     changed = skipped = total_ins = 0
     for f in sorted(glob.glob(os.path.join(CASES, "*.md"))):
         base = os.path.basename(f)
         if not re.match(r"\d", base):
             continue
-        lines = open(f, encoding="utf-8").read().split("\n")
+        raw = open(f, encoding="utf-8").read().split("\n")
+        had = sum(1 for l in raw if l.lstrip().startswith(MARK))
+        lines = [l for l in raw if not l.lstrip().startswith(MARK)]
         out, ins = [], 0
-        for i, l in enumerate(lines):
+        for l in lines:
             out.append(l)
             m = RE_CARD.match(l)
             if not m:
                 continue
-            title = m.group(2)
-            got = card2play.get((base, title))
-            # 冪等：下一行已是標記就跳過
-            if i + 1 < len(lines) and lines[i + 1].lstrip().startswith(MARK):
-                skipped += 1
-                continue
+            got = card2play.get((base, m.group(2)))
             if not got:
                 continue
             seen, uniq = set(), []
@@ -250,16 +249,17 @@ def main():
                 if p not in seen:
                     seen.add(p)
                     uniq.append((p, n))
-            row = (MARK + " ｜ ".join(f"§{p} {n}" for p, n in uniq[:5])
-                   + f"　（出自 `00-打法库` 案例行；⚠️ **未標記 ≠ 不適用** —— "
-                     f"全庫僅 32/104 條打法的案例行指名了品牌）")
-            out.append(row)
+            out.append(MARK + " ｜ ".join(f"§{p} {n}" for p, n in uniq[:5])
+                       + "　（由 `references/00-打法库.md` 的 `**案例**` 行反查；"
+                         "**未標記 ≠ 不適用**，只代表該卡尚未被任何打法指名）")
             ins += 1
-        if ins:
+        if had == ins and raw == raw:
+            skipped += 1
+        if "\n".join(out) != "\n".join(raw):
             open(f, "w", encoding="utf-8").write("\n".join(out))
             changed += 1
-            total_ins += ins
-    print(f"✅ 打標完成：{changed} 檔／{total_ins} 張卡插入｜{skipped} 張已標過")
+        total_ins += ins
+    print(f"✅ 打標完成：{changed} 檔更新／{total_ins} 張卡有標｜未變 {skipped} 檔")
     sys.exit(0)
 
 

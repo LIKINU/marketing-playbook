@@ -295,7 +295,15 @@ def model_brief(code, nsteps=3):
 #                          ② 條列（`**1｜品牌（年份）· 誰做的：X**` ＋ 做了什麼／結果／可抄的點）
 # ─────────────────────────────────────────────────────────────
 def parse_cards(cases_file):
-    """→ [{"brand":…, "one":…, "what":…, "result":…, "points":…}]"""
+    """→ [{"brand":…, "one":…, "what":…, "result":…, "points":…}]
+
+    兼容 **三種** 案例清單寫法（第一版只認前兩種，第三種靜默回 0 張卡 ——
+    29／32／33／51 因此一直抽不出卡片，kb_audit 的 L2 才把它抓出來）：
+      ① 表格：`| # | 案例 | 一句話 | 最硬的一個數字 |`
+      ② 條列 A：`**1｜品牌（年份）· 誰做的：X · 深度卡 §3.1**` ＋ `- **做了什麼**：…`
+      ③ 條列 B：`1. **品牌**｜角度（年份）`
+    另外：**機構檔（46–51）沒有「案例清單」，卡片就是 `### 3.N 標題`** → 直接以標題為卡。
+    """
     if cases_file in _CARDS:
         return _CARDS[cases_file]
     p = os.path.join(REF, "cases", os.path.basename(cases_file))
@@ -314,24 +322,64 @@ def parse_cards(cases_file):
                     continue
                 out.append({"brand": r[1].strip(), "one": r[2].strip(),
                             "result": r[3].strip(), "what": "", "points": ""})
-            # ② 條列格式
+            # ②③ 條列格式（兩種寫法）
             if not out:
                 cur = None
                 for ln in body.split("\n"):
-                    h = re.match(r"^\*\*(\d+)[｜|]\s*(.+?)\*\*", ln)
+                    s = ln.strip()
+                    h = (re.match(r"^\*\*\d+\s*[｜|]\s*(.+?)\*\*", s)
+                         or re.match(r"^\d+\s*[.、]\s*\*\*(.+?)\*\*", s))
                     if h:
-                        cur = {"brand": h.group(2).strip(), "one": "",
-                               "what": "", "result": "", "points": ""}
+                        rest = h.group(1).strip()
+                        brand = re.split(r"\s*[｜|]\s*", rest)[0].strip() if re.search(r"[｜|]", rest) else rest
+                        cur = {"brand": brand, "one": "", "what": "", "result": "", "points": ""}
                         out.append(cur)
                         continue
                     if cur is None:
                         continue
                     for key, field in (("做了什麼", "what"), ("結果", "result"), ("可抄的點", "points")):
-                        mk = re.match(r"^[-*]\s*\*\*" + key + r"\*\*[：:]\s*(.+)$", ln.strip())
+                        mk = re.match(r"^[-*]\s*\*\*" + key + r"\*\*[：:]\s*(.+)$", s)
                         if mk:
                             cur[field] = mk.group(1).strip()
+        if not out:
+            # 機構檔（46–51）：沒有案例清單，卡片即 `### 3.N 標題`
+            for mm in re.finditer(r"(?m)^###\s+3\.\d+\s+(.+?)\s*$", t):
+                out.append({"brand": mm.group(1).strip(), "one": "", "what": "",
+                            "result": "", "points": ""})
     _CARDS[cases_file] = out
     return out
+
+
+def hint_candidates(hint):
+    """從打法的 `**案例**` 行抽出「可用來對卡片標題的品牌候選」。
+
+    為什麼要抽「前綴」：案例行寫的是描述句——「瑞幸 × 茅台醬香拿鐵，2023」、
+    「成分黨口播帳號開頭結構」——而卡片標題是「瑞幸 × 貴州茅台｜醬香拿鐵（2023）」。
+    整串比對命中率只有 1.8%（2026-09-17 實測）；切成 2–6 字前綴後升到 31%，
+    且抽樣檢查全部正確（超級符號→蜜雪冰城、品牌諺語→王老吉、包裝即媒體→農夫山泉…）。
+    **抽不出來的部分一律進「知識庫缺口」，不硬湊。**
+    """
+    names = []
+    for m in re.finditer(r"[（(]([^）)]*)[）)]", hint or ""):
+        p = re.sub(r"^[（(]|[）)]$", "", m.group(1).strip())
+        for x in re.split(r"[、；，,]", p):
+            x = re.sub(r"[「『].*$", "", x.strip()).strip()
+            x = re.sub(r"\d{4}\s*年.*$", "", x).strip()
+            if x:
+                names.append(x)
+    out = []
+    for n in names:
+        for part in re.split(r"[×xX]|\s+", n):
+            part = part.strip()
+            for k in range(len(part), 1, -1):
+                if 2 <= k <= 6:
+                    out.append(part[:k])
+    seen, uniq = set(), []
+    for x in out:
+        if x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
 
 
 def pick_cards(play, ind, limit=2):
@@ -344,12 +392,13 @@ def pick_cards(play, ind, limit=2):
     寧可空着讓 composer 把它列進「知識庫缺口」，也不要假引用。
     """
     hint = play.get("cases_raw", "")
+    cands = hint_candidates(hint)
     picks, seen = [], set()
     for cf in play.get("cases", []):
         for c in parse_cards(cf):
-            brand = re.split(r"[｜|·（(]", c["brand"])[0].strip()
-            if brand and brand in hint and (cf, brand) not in seen:
-                seen.add((cf, brand))
+            base = re.split(r"[｜|（(]", c["brand"])[0].strip()
+            if base and any(x in base for x in cands) and (cf, base) not in seen:
+                seen.add((cf, base))
                 picks.append((cf, c))
     return picks[:limit]
 

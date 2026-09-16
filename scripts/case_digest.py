@@ -15,7 +15,8 @@ def blocks(text):
     return out
 
 CUT = int(sys.argv[2]) if len(sys.argv) > 2 else 170
-R = "~/Desktop/Marketing-skill/references/cases"
+import os as _os
+R = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "references", "cases")
 for pat in sys.argv[1].split(","):
     fp = glob.glob(f"{R}/{pat}-*.md")
     if not fp:

@@ -3,7 +3,8 @@
 """扫出案例档的断句损坏行（打印完整行，便于写精准修复）"""
 import re, sys, glob, os
 
-R = "~/Desktop/Marketing-skill/references/cases"
+import os as _os
+R = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "references", "cases")
 CJK = r"[\u4e00-\u9fff]"
 PATS = [
     ("粗体后缺冒号", re.compile(r"\*\*[^*\n]{2,26}\*\*(?=" + CJK + r")")),

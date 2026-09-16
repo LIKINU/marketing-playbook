@@ -99,9 +99,13 @@ def main():
         args = [a.rules] if script == "gate_check.py" else (
             [a.budget] if script == "budget_check.py" else [a.plan])
         if script == "budget_check.py" and not a.budget:
-            print(f"\n{'─' * 64}\n{label}\n{'─' * 64}")
-            print("⚠️  未提供 --budget → 跳過（協議 3 第 7 項要求「預算分項加總＝合計」，建議補）")
-            failures.append("預算校驗未執行（未提供 --budget）")
+            # 沒給 --budget → 讓 budget_check 直接吃方案稿（它會自己抓預算表）
+            print(f"\n{'─' * 64}\n{label}（未提供 --budget → 自動從方案稿抓預算表）\n{'─' * 64}")
+            rc_auto = run("budget_check.py", [a.plan], f"{label}（自動抓表）")
+            if rc_auto != 0:
+                print("⚠️  自動抓表未通過 —— 可能是抓錯了表（方案裡第一張含「金額」的表）。")
+                print("    建議：提供 --budget budget.json（顯式、可靠）")
+                failures.append("預算校驗未可靠執行（自動抓表未通過，建議補 --budget）")
             continue
         rc = run(script, args, label)
         if rc != 0:

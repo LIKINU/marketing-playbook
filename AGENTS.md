@@ -108,6 +108,20 @@ python scripts/run_pipeline.py \
 > **為什麼要單一入口**：單獨跑四個腳本時，執行者很容易「忘記跑」「選擇性跑」「跑不過就手工繞過」。
 > 串成一條鏈之後，**用這個 skill 就必然經過代碼** —— 想拿到 `.docx`，只能從這條鏈走。
 
+### 後置環節：按客戶格式范本重排
+
+客戶／比賽自帶提交格式時，**不要重寫，要映射**（協議 2：合併，不取捨）：
+
+```bash
+python scripts/reformat_to_template.py --source 方案.md --template 客戶范本.docx --dry-run   # 看建議
+python scripts/reformat_to_template.py --source 方案.md --template 客戶范本.docx \
+    --map 映射.json -o 方案-按範本.md --report 要素核對.md                                   # 重排
+python scripts/run_pipeline.py --rules rules.json --plan 方案-按範本.md -o 方案-按範本.docx --title "…"  # 出稿
+```
+
+- 范本要、源稿沒有的章節 → 標【待補】；源稿有、范本沒位的 → **整節移入附錄**
+- **硬要素核對**：丟一件就退出碼 1（不准出稿）
+
 **也可以單獨跑某一關**（除錯用）：| 腳本 | 時機 | 不過的後果 |
 |---|---|---|
 
@@ -143,7 +157,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
-| `scripts/` | **腳本強制層**：**`run_pipeline.py`（唯一出稿入口）** ＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `scripts/` | **腳本強制層**：**`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按范本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |
 | `references/00-打法库.md` | 104 條打法（狀況 → 打法） | **生成方案時最先讀** |

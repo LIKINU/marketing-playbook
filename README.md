@@ -91,6 +91,9 @@
 **一份 Word 文檔（`.docx`）**，簡體中文，八篇 + 附件。
 > ⛔ 出稿走唯一入口：`python scripts/run_pipeline.py --rules rules.json --plan plan.md -o 方案.docx --title "…"`
 > 它會依序跑門禁／預算／自檢／診斷，**任何一關不過就拿不到 `.docx`** —— 想跳過也跳不過。
+>
+> 📐 **客戶給了格式范本？** 不用重寫，用 `scripts/reformat_to_template.py` 按范本重排：
+> 范本要的章節缺內容會標【待補】，源稿多出來的整節移入附錄，**硬要素丟一件就拒絕出稿**（協議 2）。
 
 
 | 篇 | 內容 |

@@ -33,7 +33,8 @@ OK, NG, WARN = "✅", "❌", "⚠️"
 BG_WORDS = ["創始人", "创始人", "成立於", "成立于", "股權", "股权", "融資", "融资",
             "營收", "营收", "財報", "财报", "估值", "董事長", "董事长", "CEO",
             "裁員", "裁员", "IPO", "上市首日", "招股書", "招股书", "創辦人", "创办人"]
-EXEMPT_MIN = 46   # 46–50 機構／書籍／出版物類：保留「理解方法所必需」的背景
+EXEMPT_SKIP = {49}   # 只豁免 49（營銷書籍與作者：作者名/書名本身即重點）
+# 註：46/47/48/50（機構/出版物類）同樣按規則清理 —— 只保留「理解其方法所必需」的背景
 
 
 def read(p):
@@ -63,10 +64,10 @@ def main():
         t = read(f)
         hits = {w: t.count(w) for w in BG_WORDS if t.count(w)}
         cnt = sum(hits.values())
-        if n < EXEMPT_MIN:
+        if n not in EXEMPT_SKIP:
             total += cnt
         if cnt:
-            rows.append((cnt, base, n >= EXEMPT_MIN, hits))
+            rows.append((cnt, base, n in EXEMPT_SKIP, hits))
             # 逐卡定位重災區
             for cm in re.finditer(r"(?m)^###\s+(\d+\.\d+)\s+(.+)$", t):
                 end = re.search(r"(?m)^#{1,3}\s", t[cm.end():])
@@ -79,10 +80,10 @@ def main():
         print("=" * 64)
         print("案例卡體檢 · 「嚴禁公司背景」")
         print("=" * 64)
-        print(f"掃描 {len(files)} 個檔；違規詞總計（不含 46–50 機構類）：{total}｜上限 {a.max}")
+        print(f"掃描 {len(files)} 個檔；違規詞總計（僅排除 49 書籍作者類）：{total}｜上限 {a.max}")
         rows.sort(reverse=True)
         for cnt, base, exempt, hits in rows[:15]:
-            tag = "（46–50 機構類·豁免）" if exempt else ""
+            tag = "（49 書籍作者類·豁免）" if exempt else ""
             top = "、".join(f"{k}×{v}" for k, v in sorted(hits.items(), key=lambda x: -x[1])[:4])
             print(f"  {cnt:>5}  {base}{tag}\n         {top}")
         if worst_cards:

@@ -27,7 +27,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
-EXEMPT_MIN = 46
+EXEMPT_SKIP = {49}   # 只豁免 49（營銷書籍與作者：作者名/書名就是重點）
 
 # 身份／股權類 —— 與營銷無關且無歧義，可安全自動刪（--scope identity）
 IDENTITY = ["創始人", "创始人", "創辦人", "创办人", "成立於", "成立于",
@@ -44,6 +44,14 @@ FINANCE = ["營收", "营收", "財報", "财报", "淨利", "净利", "歸母",
 FORBID = IDENTITY + FINANCE
 
 # 含這些標記的子句＝「營銷結果」→ 即使帶財報詞也保留（該留的是營銷結果）
+SAFE_CTX = [   # 語境豁免（2026-09-16）：這些寫法裡「創始人/融資/營收」不是公司背景
+    r"給[^。]{0,10}創始人", r"創始人[^。]{0,10}(補課|掃盲|露臉|出鏡|做|團隊)",
+    r"(客戶|對方)[^。]{0,14}融資", r"融資或併購", r"融資[、／/]併購",
+    r"(萬|億|\d)[^。]{0,6}營收的客戶", r"營收的客戶", r"非營銷背景",
+    r"乙方機構", r"按[^。]{0,8}營收", r"營收規模", r"年?營收約",
+    r"(虧損|減值|裁員)[^。]{0,10}(風險|條款|適用|同樣)",
+]
+
 KEEP_MARK = ["銷量", "销量", "市佔", "市占", "曝光", "播放", "熱搜", "热搜", "門店", "门店",
              "復購", "复购", "客流", "下載", "下载", "DAU", "MAU", "用戶數", "用户数",
              "粉絲", "粉丝", "客單", "客单", "轉化", "转化", "留存", "好評", "好评",
@@ -73,7 +81,7 @@ def clean_line(ln, forbid=None):
     for part in SPLIT.split(rest):
         has_bg = any(k in part for k in forbid)
         has_mkt = any(k in part for k in KEEP_MARK)
-        if has_bg and not has_mkt:      # 只刪「純背景／財報」子句；帶營銷結果的保留
+        if has_bg and not has_mkt and not any(re.search(rx, part) for rx in SAFE_CTX):
             dropped += 1
         else:
             kept.append(part)
@@ -84,6 +92,11 @@ def clean_line(ln, forbid=None):
     out = re.sub(r"[、，,；;]\s*$", "", out)
     out = re.sub(r"^[、，,；;。\s]+", "", out)
     out = re.sub(r"[（(]\s*[)）]", "", out)
+    # 括號殘缺：刪掉子句後若有沒配上的「（」，從它截斷（連同後面的殘留）
+    if out.count("（") > out.count("）"):
+        out = out[:out.rfind("（")].rstrip("、，；; ")
+    while out.count("）") > out.count("（") and "）" in out:
+        out = out.replace("）", "", 1)
     while out.count("**") % 2:      # 修補被刪掉一半的粗體
         i = out.rfind("**")
         out = out[:i] + out[i+2:]
@@ -112,7 +125,7 @@ def _looks_broken(orig, new):
     if re.search(r"[，、；]\s*[。；]", new):
         return True
     strip = lambda s: re.sub(r"[\s*\-|]", "", s)
-    if len(strip(orig)) >= 24 and len(strip(new)) < 0.4 * len(strip(orig)):
+    if len(strip(orig)) >= 24 and len(strip(new)) < 0.3 * len(strip(orig)):
         return True
     return False
 
@@ -153,7 +166,7 @@ def main():
     for f in files:
         base = os.path.basename(f)
         m = re.match(r"(\d+)", base)
-        if m and int(m.group(1)) >= EXEMPT_MIN:
+        if m and int(m.group(1)) in EXEMPT_SKIP:
             continue
         d, c = process(f, a.apply, {"identity": IDENTITY, "finance": FINANCE, "all": FORBID}[a.scope])
         tot_d += d

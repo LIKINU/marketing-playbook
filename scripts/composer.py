@@ -511,11 +511,139 @@ def card_line(cf, c, maxlen=200):
 
 
 def _book(b):
-    """49 書籍字串 → 引用格式。容忍沒有「｜作者」的字串，不崩。"""
+    """49 書籍字串 → 引用格式。容忍沒有「｜作者」的字串，不崩。
+
+    ⚠️ 2026-09-17：這是**內部版**（帶 `49` 編號），只進 internal 文件。
+       交付稿一律用 `book_explain()` —— 展開成白話，不帶編號。
+    """
     parts = [x.strip() for x in b.split("｜")]
     name = parts[0]
     author = parts[1] if len(parts) > 1 else ""
     return f"{name}（{author}49）" if author else f"{name}（49）"
+
+
+# ─────────────────────────────────────────────────────────────
+# 4b. 交付稿專用：把「理論／書籍／案例」展開成白話（2026-09-17 新增）
+#
+#   用戶訴求（原話）：「不是只是引用了就行了，不是拿了案例就行了，
+#   說有什麼理論是沒有任何意義也沒有任何作用的 —— 而是要根據這些案例、
+#   這些理論、這些觀點寫具體的操作、具體的做法。」
+#   「交付出來的東西應該是可以直接看的，而不是有例如像（打法库 §4.1）
+#    這樣的引用。」
+#
+#   → 所以：**知識含量只增不減，座標全部剝掉**。
+#     §X.X／03 §C1／（作者49）／`cases/xx.md` 這些內部座標對客戶毫無意義
+#     （他不知道去哪查，也不知道那是什麼），全部改寫成可讀的內容。
+# ─────────────────────────────────────────────────────────────
+_B49 = {}          # 《書名》 → {"what": 核心主張, "effect": 效果}
+
+
+def load_books(path):
+    """讀 49 書籍檔，抽出每本書的「③ 做了什麼（核心主張）」＋「⑤ 效果」。
+
+    為什麼要讀內容而不只給書名（與 `load_model_names` 同一個教訓）：
+    只給一個書名＝「說有什麼理論沒有任何意義」，執行 AI 據此寫不出具體做法。
+    """
+    if not os.path.exists(path):
+        return
+    t = read(path)
+    for b in re.split(r"(?m)^###\s*", t)[1:]:
+        m = re.match(r"[\d.]+\s*(《[^》]+》)", b)
+        if not m:
+            continue
+        d = {"what": "", "effect": ""}
+        mw = re.search(r"\*\*③\s*做了什麼\*\*[：:]?\s*(.*?)(?=\n\s*[-*]\s*\*\*⑤|\Z)",
+                       b, flags=re.S)
+        if mw:
+            d["what"] = re.sub(r"\s+", " ", mw.group(1).replace("**", "")).strip()
+        me = re.search(r"\*\*⑤\s*效果\*\*[：:]?\s*(.*?)(?=\n\s*[-*]\s*\*\*[⑥⑦]|\Z)",
+                       b, flags=re.S)
+        if me:
+            d["effect"] = re.sub(r"\s+", " ", me.group(1).replace("**", "")).strip()
+        _B49[m.group(1)] = d
+
+
+def _load_t2s():
+    """载入内置繁→简单字表（`scripts/t2s_data.py`，机械生成）。
+
+    為什麼不用 opencc／zhconv：那要多一個依賴，跨平台（沒網／沒 pip 的環境）就掛。
+    這張表覆蓋本知識庫實際用到的全部繁體字，零依賴、純 dict 查表。
+    載入失敗（檔案被刪）→ 退回不轉換，**不拋錯** —— 繁體最終由 selfcheck 兜底。
+    """
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        from t2s_data import T2S_PAIRS as _P
+        return {_P[i]: _P[i + 1] for i in range(0, len(_P) - 1, 2)}
+    except Exception:
+        return {}
+
+
+_T2S_MAP = _load_t2s()
+
+
+def _t2s_light(s):
+    """繁→简（逐字查表）。知識庫原文是繁體，交付稿必須簡體 —— 在注入時就轉掉，
+    不要留給模型（模型會漏，selfcheck 就會卡在交付前）。"""
+    if not s or not _T2S_MAP:
+        return s
+    return "".join(_T2S_MAP.get(ch, ch) for ch in s)
+
+
+def book_explain(b, maxlen=150):
+    """書籍 → 「《書名》（作者）：核心主張…」白話，**不帶 `49` 編號**。"""
+    name = b.split("｜")[0].strip()
+    author = b.split("｜")[1].strip() if "｜" in b else ""
+    d = _B49.get(name, {})
+    txt = name
+    if author:
+        txt += f"（{author}）"
+    body = d.get("what") or d.get("effect") or ""
+    if body:
+        txt += f"：{body}"
+    if len(txt) > maxlen:
+        txt = txt[:maxlen].rstrip() + "…"
+    return _t2s_light(txt)
+
+
+def model_explain(code, nsteps=4):
+    """模型碼 → 「模型名：解決什麼問題。具體用法：第1步…；第2步…」
+
+    與 `model_brief()` 的差別：**不帶（03 §C1）座標**，且步驟給到 4 步（更詳盡）。
+    座標拿掉、內容加長 —— 對客戶來說可讀性與可操作性都更高。
+    """
+    name = _M03_RE.get(code, "")
+    prob = _M03_BRIEF.get(code, "")
+    steps = _M03_STEPS.get(code, [])[:nsteps]
+    if not name and not prob and not steps:
+        return ""
+    out = name or ""
+    if prob:
+        out += f"：解决的是「{prob[:100]}」"
+    if steps:
+        out += "。具体用法：" + "；".join(
+            f"第{i}步 {s[:40]}" for i, s in enumerate(steps, 1))
+    return _t2s_light(out)
+
+
+def card_line_public(c, maxlen=260):
+    """案例卡 → 交付稿用的一行（**不帶 `cases/xx.md` 路徑與卡號**）。
+
+    形態（用戶 2026-09-17 選定）：`**品牌** —— 他做了什麼　▶ 结果：數字`
+    保留品牌名作佐證（可信度），不暴露內部檔名。
+    """
+    brand = re.split(r"\s*[·・]\s*", c["brand"])[0].strip()
+    body = c.get("what") or c.get("one") or ""
+    res = c.get("result") or ""
+    txt = f"**{brand}**" if brand else ""
+    if body:
+        txt += f" —— {body}"
+    if res:
+        txt += f"　▶ 结果：{res}"
+    txt = _t2s_light(txt).strip()
+    if len(txt) > maxlen:
+        txt = txt[:maxlen].rstrip() + "…"
+    return txt
 
 
 # ─────────────────────────────────────────────────────────────
@@ -539,14 +667,6 @@ def parse_steps(howto):
     return steps
 
 
-def _book(b):
-    """49 書籍字串 → 引用格式。容忍沒有「｜作者」的字串，不崩。"""
-    parts = [x.strip() for x in b.split("｜")]
-    name = parts[0]
-    author = parts[1] if len(parts) > 1 else ""
-    return f"{name}（{author}49）" if author else f"{name}（49）"
-
-
 def infer_industry(gate, kmap):
     """從『賣什麼／品類／賣給誰』推 cases 行業檔（確定性關鍵詞匹配）。"""
     txt = " ".join(str(gate.get(k, "")) for k in ("賣什麼", "品类", "品類", "賣給誰", "行业", "行業"))
@@ -559,35 +679,45 @@ def infer_industry(gate, kmap):
 
 
 def play_block(i, p, kmap, ind=""):
+    """交付稿用的打法段 —— **零內部座標**（2026-09-17 重寫）。
+
+    舊版長這樣，客戶全看不懂：
+        **打法 1｜包裹卡引流**（打法库 §4.1）
+        - 理论依据：AIDA（03 §C1）＋《影响力》（西奥迪尼49）＋（打法库 §4.1）
+        - 可抄案例：xx —— …（`cases/12-xxx.md`）
+
+    新版：座標全剝，知識展開成「別人怎麼做的」＋「為什麼這麼做」。
+    """
     models, books = theory_for(p, kmap)
-    # 2026-09-17：理論依據不再只給編號 —— 附上「解決什麼問題 ＋ 前幾步」
-    mtxt = "；".join(model_brief(c, 2) for c in models)
-    btxt = "、".join(_book(b) for b in books)
+    # 理論：**不帶編號**，且比舊版更詳盡（模型：解決什麼問題 ＋ 前 4 步用法）
+    mtxt = "　".join(x for x in (model_explain(c, 4) for c in models) if x)
+    btxt = "　".join(book_explain(b) for b in books)
     picks = pick_cards_ex(p, ind)
     if picks:
-        cases = "　".join(
-            card_line(cf, c) + ("〔指名〕" if src == "指名" else "〔本行业〕")
-            for cf, c, src in picks)
+        cases = "\n" + "\n".join(f"  - {card_line_public(c)}" for cf, c, src in picks)
     else:
-        cases = "**（无）** —— 本条打法在本行业档里也找不到可用卡片，见 §2.0.2 待补清单"
+        cases = (f"\n  - 暂无可直接参照的公开案例 —— 本条按下方原理推导执行，"
+                 f"上线前先小范围试跑一周再决定是否放量")
     # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
     steps = parse_steps(p["howto"])
     if steps:
         s_lines = [
-            f"  {k}. {act} ｜ 时间：{FILL} ｜ 谁做：{FILL} ｜ 物料·话术：{FILL} ｜ 产出：{out or FILL}"
+            f"  {k}. {_t2s_light(act)} ｜ 时间：{FILL} ｜ 谁做：{FILL} ｜ 物料·话术：{FILL} ｜ 产出：{_t2s_light(out) or FILL}"
             for k, (act, out) in enumerate(steps, 1)
         ]
         howto = "\n".join(s_lines)
     else:
         howto = "  1. " + FILL
+    why = "　".join(x for x in (mtxt, f"参考观点：{btxt}" if btxt else "") if x) or FILL
     return (
-        f"**打法 {i}｜{p['name']}**（打法库 §{p['id']}）\n"
-        f"- **为什么用它**：{p['situation'] or FILL}\n"
+        f"**打法 {i}｜{_t2s_light(p['name'])}**\n"
+        f"- **为什么用它**：{_t2s_light(p['situation']) or FILL}\n"
         f"- **具体动作（精准到每一步）**：\n{howto}\n"
-        f"- **谁做｜花多少｜多久见效**：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
-        f"- **验收指标**：{p['verify'] or FILL}\n"
-        f"- **可抄案例（已注入卡片内容）**：{cases}\n"
-        f"- **理论依据**：{mtxt} ＋ {btxt} ＋（打法库 §{p['id']}）\n"
+        f"- **谁做｜花多少｜多久见效**：{_t2s_light(p['who']) or FILL}｜"
+        f"{_t2s_light(p['budget']) or FILL}｜{_t2s_light(p['period']) or FILL}\n"
+        f"- **验收指标**：{_t2s_light(p['verify']) or FILL}\n"
+        f"- **可抄案例（别人怎么做的、结果如何）**：{cases}\n"
+        f"- **为什么这么做（背后的道理，照这个改就不会跑偏）**：{why}\n"
     )
 
 
@@ -598,33 +728,33 @@ def build_lite(rules, plays, kmap, cardpoints, today):
     cp = "／".join(f"{c}（{CARDPOINT_NAME.get(c, c)}）" for c in cardpoints)
     ind = infer_industry(gate, kmap)
     lines = [
-        f"# {client} · 打法速覽（速覽档 · composer 组装）\n",
-        f"> 給小微企業／個案：一頁看懂「該打哪幾條、怎麼打、花多少」。完整交付請改用 `--tier 标准`／`G端`。\n",
-        f"> 生成 {today} ｜ 打法匹配自 `00-打法库 §0 总表`\n\n",
+        f"# {client} · 打法速览\n",
+        f"> 一页看懂「该打哪几条、怎么打、花多少」。\n",
+        f"> 生成日期：{today}\n\n",
         f"## 一、卡点一句话\n- 问题类型：**{cp}**\n- 真正的卡点：{FILL}（不是 X —— 是 Y）\n\n",
         f"## 二、建议打法（{len(plays)} 条）\n",
     ]
-    ind = infer_industry(gate, kmap)
     for i, p in enumerate(plays, 1):
         models, books = theory_for(p, kmap)
         steps = parse_steps(p["howto"])[:3]
-        s = "；".join(f"{k}) {a}" for k, (a, _) in enumerate(steps, 1))
+        s = "；".join(f"{k}) {_t2s_light(a)}" for k, (a, _) in enumerate(steps, 1))
         picks = pick_cards_ex(p, ind, limit=1)
-        cl = (f"　★ 可抄({picks[0][2]})：{card_line(picks[0][0], picks[0][1], 180)}"
-              if picks else "")
+        cl = (f"\n- 可抄案例：{card_line_public(picks[0][1], 180)}" if picks else "")
+        why = "；".join(x for x in (model_explain(c, 3) for c in models) if x)
+        if books:
+            why = (why + "；" if why else "") + "、".join(book_explain(b) for b in books)
         lines.append(
-            f"**{i}. {p['name']}**（打法库 §{p['id']}）—— {p['situation']}\n"
+            f"**{i}. {_t2s_light(p['name'])}** —— {_t2s_light(p['situation'])}\n"
             f"- 怎么打：{s or FILL}\n"
-            f"- 谁做｜花多少｜多久见效：{p['who'] or FILL}｜{p['budget'] or FILL}｜{p['period'] or FILL}\n"
-            f"- 理论依据：{'；'.join(model_brief(c, 2) for c in models)} ＋ "
-            f"{'、'.join(_book(b) for b in books)} ＋（打法库 §{p['id']}）{cl}\n"
+            f"- 谁做｜花多少｜多久见效：{_t2s_light(p['who']) or FILL}｜"
+            f"{_t2s_light(p['budget']) or FILL}｜{_t2s_light(p['period']) or FILL}\n"
+            f"- 验收指标：{_t2s_light(p['verify']) or FILL}\n"
+            f"- 为什么这么做：{why or FILL}{cl}\n"
         )
     lines += [
-        f"\n## 三、预算量级\n{FILL}（各条打法预算相加；含盈虧線）\n\n",
+        f"\n## 三、预算量级\n{FILL}（各条打法预算相加；含盈亏线测算）\n\n",
         f"## 四、下一步（只写一件）\n{FILL}\n",
     ]
-    lines.insert(3, (f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n" if ind
-                     else "> 同类行业案例库：未识别行业 → 请按品类自选 `references/cases/01–45`\n"))
     return "\n".join(lines)
 
 
@@ -638,24 +768,20 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     if tier == "速览":
         return build_lite(rules, plays, kmap, cardpoints, today)
 
+    # 2026-09-17：頭部施工說明全部移除（「本骨架由 composer.py 機械組裝」「打法匹配自
+    #   `00-打法库 §0 总表`」「同類行業案例庫：references/cases/xx.md」…）。
+    #   這些是給執行 AI 的工單，客戶看不懂也不需要看 —— 改寫進 internal 文件。
     head = (
-        f"# {client} · 营销方案（composer 骨架 · {tier}档）\n\n"
-        f"> 本骨架由 `composer.py` 机械组装：**打法／理论依据／可抄案例均来自知识库，请勿删改**；"
-        f"你只需补 `{FILL}` 处数字与本地化描述。\n"
-        f"> ⚠️ 注入的 00/03/49 原文为繁体，且可能含个别广告法禁用词；交付前请**本地化为简体**并逐字对照禁用词表。\n"
-        f"> 生成 {today} ｜ 档位 {tier} ｜ 打法匹配自 `00-打法库 §0 总表`（SKILL.md §二 路由表驱动）\n"
-        + (f"> 同类行业案例库：`references/cases/{ind}.md`（先读第一节清单）\n"
-           if ind
-           else "> 同类行业案例库：未识别行业 → 请按品类自选 `references/cases/01–45`（先读第一节清单）\n")
-        + "\n"
-        f"## 执行摘要（TL;DR）\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
-        f"- 核心打法：{'、'.join(p['name'] for p in plays)}\n"
+        f"# {client} · 营销方案\n\n"
+        f"> 生成日期：{today}\n\n"
+        f"## 执行摘要\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
+        f"- 核心打法：{'、'.join(_t2s_light(p['name']) for p in plays)}\n"
         f"- 预期 KPI：{FILL}\n- 盈亏线：{FILL}\n\n"
     )
 
     diagnosis = (
         f"## 一 · 现状分析\n### 1.1 问题类型与目标\n"
-        f"- 问题类型：**{cp}**（A–H 分类见 SKILL.md 第 2 步）\n"
+        f"- 问题类型：**{cp}**（八类：认知／交易／渠道／信任／复购／定价／组织／合规）\n"
         f"- 生意目标：{FILL}\n\n### 1.2 真正的卡点\n"
         f"> {FILL}：不是 X —— 是 Y\n\n### 1.3 已排除的假设\n{FILL}\n\n"
         f"### 1.4 竞争与关联品牌扫描\n- 头号对手（按业务环节全链条拆：获客→信任→成交→履约→复购）：{FILL}\n"
@@ -665,36 +791,23 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
 
     strategy = "## 二 · 策略\n### 2.0 打法组合（核心）\n\n"
     strategy += "".join(play_block(i + 1, p, kmap, ind) + "\n" for i, p in enumerate(plays))
-    strategy += "### 2.0.1 可抄案例（已注入卡片内容 —— 别人是怎么做的）\n"
+    strategy += "### 2.0.1 可抄案例（别人是怎么做的、结果如何、我们怎么用）\n"
     for i, p in enumerate(plays):
         picks = pick_cards_ex(p, ind, limit=2)
         if picks:
-            strategy += f"- **打法 {i+1}（{p['name']}）**：\n"
+            strategy += f"- **打法 {i+1}（{_t2s_light(p['name'])}）**：\n"
             for cf, c, src in picks:
-                strategy += f"  - {card_line(cf, c, 320)}〔{src}〕\n"
+                strategy += f"  - {card_line_public(c, 320)}\n"
                 if c.get("points"):
-                    strategy += f"    - 可抄的點：{c['points'][:200]}\n"
+                    strategy += f"    - 可抄的点：{_t2s_light(c['points'])[:200]}\n"
             strategy += f"    - **我们怎么用**：{FILL}（面对的问题／我们改哪一步／预期结果）\n"
         else:
-            strategy += (f"- **打法 {i+1}（{p['name']}）**：{FILL}"
-                         "（本条打法尚无可引用的指名卡片 → 见 §2.0.2）\n")
+            strategy += (f"- **打法 {i+1}（{_t2s_light(p['name'])}）**：{FILL}"
+                         "（暂无可直接参照的公开案例，按该打法的原理推导执行）\n")
 
-    # 2026-09-17 新增：把「知识库缺口」显式写进骨架。
-    #   用户第五点投诉的根因就是「库里的东西没被用上」——但**不能靠假引用掩盖**，
-    #   要把「哪条打法指不出案例」变成方案里一条看得见、要去补的待办。
-    gaps = uncovered_plays(plays, ind)
-    strategy += "\n### 2.0.2 知识库缺口（**必须补的事实，不得编造**）\n"
-    if gaps:
-        strategy += (f"> 以下 {len(gaps)} 条打法的 `00-打法库` 案例行**未指名品牌**（或无名可指），"
-                     f"因此未能自动注入卡片。**在交付前必须做二选一**：\n"
-                     f"> ① 去 `references/cases/{ind or '（本行业档）'}` 的「案例清單」挑 1–2 张，"
-                     f"把「品牌＋做了什麼＋結果」抄进来；\n"
-                     f"> ② 补 `references/00-打法库.md` 对应条目 `**案例**` 行的指名品牌（一次性修复，全库受益）。\n"
-                     f"> ⛔ **既不补卡片、也不补案例行，就写「本行业暂无可引用的公开案例」——不许编一个案例出来。**\n\n")
-        for p, why in gaps:
-            strategy += f"- **{p['name']}**（打法库 §{p['id']}）—— {why}\n"
-    else:
-        strategy += "> 无缺口：本方案引用的每条打法都指得出具体案例卡。\n"
+    # 2026-09-17：原「2.0.2 知识库缺口」整章移出交付稿 —— 那是**我們自己的維護待辦**
+    #   （哪条打法的案例行没指名品牌、要去补哪个文件），客户既看不懂也无义务替我们补库。
+    #   改寫進 internal 文件（`--internal`），執行 AI 與維護者看那份即可。
     strategy += (
         f"\n### 2.1 三次收窄（时间／人群／动作）\n{FILL}\n\n"
         f"### 2.2 货盘与机制\n{FILL}\n\n"
@@ -703,7 +816,8 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     positioning = (
         "## 三 · 定位与口径\n### 3.1 定位与差异化支点\n"
         f"- 定位语（一句话）：{FILL}\n"
-        f"- 学理依据：{'；'.join(model_brief(c, 3) for c in ['B5', 'C1'])}；{kmap['major_theory']['1']['books'][0].split('｜')[0]}（{kmap['major_theory']['1']['books'][0].split('｜')[1] if '｜' in kmap['major_theory']['1']['books'][0] else ''}49）—— 说明用在定位的哪一步\n"
+        f"- 学理依据：{'；'.join(x for x in (model_explain(c, 3) for c in ['B5', 'C1']) if x)}；"
+        f"{book_explain(kmap['major_theory']['1']['books'][0])} —— 说明用在定位的哪一步\n"
         f"- 三个支点（各跟一个可查证事实）：{FILL}\n\n"
         f"### 3.2 禁用词与红线（什么话绝不能说）\n{FILL}\n\n"
         f"### 3.3 对不同人说什么\n{FILL}\n\n"
@@ -716,7 +830,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
     exec_ = (
         f"## 八 · 执行与风控\n### 8.1 行动清单（做什么／谁做／什么时候／花多少／验收）\n{FILL}\n\n"
         f"### 8.2 执行人力检查（人力不足时的删减顺序）\n{FILL}\n\n"
-        f"### 8.3 风险清单（每条挂「模式 NN」＋四件套：排序理由/预警信号/兜底预案/预防动作）\n{FILL}\n\n"
+        f"### 8.3 风险清单（每条写清四件套：为什么会发生／预警信号／兜底预案／预防动作）\n{FILL}\n\n"
         f"### 8.4 关键假设与验证\n{FILL}\n\n"
         f"### 8.5 待解决问题清单\n{FILL}\n\n"
         f"### 8.6 不承诺的事\n{FILL}\n\n"
@@ -737,25 +851,93 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints):
             "- 广告法与平台政策红线：【填】\n- 舆情风险清单与应对：【填】\n\n"
         )
 
-    appendix = (
-        "## 附件 · 交付自检单（12 项，逐项 ✅/❌）\n"
-        "| # | 自检项 | 结果 |\n|---|---|---|\n"
-        "| 1 | 门禁 13 项已问全（含目标字数）并写入《任务规则表》 | 【填】 |\n"
-        "| 2 | 未经验证的假设已在文首单独标注 | 【填】 |\n"
-        "| 3 | 文档结构完整（八篇＋附件） | 【填】 |\n"
-        "| 4 | 字数达标（任务规则表确认） | 【填】 |\n"
-        "| 5 | 每条打法五要素（做什么/谁/何时/花多少/怎么验收） | ✅（composer 注入） |\n"
-        "| 6 | 禁用词与口径章节存在，物料文案已逐字对照 | 【填】 |\n"
-        "| 7 | 预算分项加总＝合计；引用数字全部有来源 | 【填】 |\n"
-        "| 8 | KPI 可测（基准值＋观测方式）＋决策节奏已写 | 【填】 |\n"
-        "| 9 | 执行人力检查＋删减顺序已写 | 【填】 |\n"
-        "| 10 | 关键假设＋验证＋Plan B 已写 | 【填】 |\n"
-        "| 11 | 无内部过程文档泄漏 | 【填】 |\n"
-        "| 12 | 交付回复中已附本自检单 | 【填】 |\n"
-    )
-
-    body = head + diagnosis + strategy + positioning + reach + copy_ + kpi + budget + exec_ + g_extra + appendix
+    # 2026-09-17：原「附件 · 交付自检单」整章移出交付稿 —— 自檢單是**內部質檢記錄**，
+    #   按協定它就該原樣輸出在 AI 的**回覆中**給用戶看，而不是印在客戶方案的最後一頁。
+    #   → 改寫進 internal 文件（見 `build_internal`），交付稿只留客戶要看的內容。
+    body = head + diagnosis + strategy + positioning + reach + copy_ + kpi + budget + exec_ + g_extra
     return body
+
+
+# ─────────────────────────────────────────────────────────────
+# 5b. 內部文件（2026-09-17 新增）
+#     交付稿要「乾淨可直接提交」，但施工說明／知識庫缺口／自檢單**不能丟** ——
+#     那就另開一份檔：只有執行 AI 與維護者看，永遠不進 .docx。
+# ─────────────────────────────────────────────────────────────
+SELFCHECK_ROWS = [
+    "门禁 13 项已问全（含目标字数）并写入《任务规则表》",
+    "未经验证的假设已在文首单独标注",
+    "文档结构完整（八篇）",
+    "字数达标（任务规则表确认）",
+    "每条打法五要素（做什么/谁/何时/花多少/怎么验收）",
+    "禁用词与口径章节存在，物料文案已逐字对照",
+    "预算分项加总＝合计；引用数字全部有来源",
+    "KPI 可测（基准值＋观测方式）＋决策节奏已写",
+    "执行人力检查＋删减顺序已写",
+    "关键假设＋验证＋Plan B 已写",
+    "交付稿无内部坐标（§／文件路径／模型码／49 编号／脚本名）",
+    "交付回复中已附本自检单",
+]
+
+
+def build_internal(rules, plays, kmap, ind, tier, today):
+    """施工說明 ＋ 知識庫缺口 ＋ 自檢單 —— **不進交付稿**。`--internal` 輸出。"""
+    client = rules.get("client", "客户")
+    lines = [
+        f"# {client} · 内部施工说明（禁止写入交付稿）\n",
+        f"> 本文件由 `composer.py` 生成，仅给执行 AI 与知识库维护者看。",
+        f"**其中任何一行都不得出现在给客户的 .docx 里**。\n\n",
+        f"## 一、本次组装参数\n",
+        f"- 生成日期：{today}　档位：{tier}\n",
+        f"- 客户：{client}\n",
+        f"- 命中行业档：`{ind or '未识别（按品类自选 cases/01–45）'}`\n",
+        f"- 选中打法：{len(plays)} 条\n\n",
+        f"## 二、施工要求\n",
+        f"1. 骨架由脚本机械组装：**打法／理论依据／可抄案例均已注入，请勿删改**。\n",
+        f"2. 你只需补 `【填】` 处的数字与本地化描述。\n",
+        f"3. 注入的知识原文可能残留繁体（已做轻量转换，但不彻底）",
+        f"—— 交付前务必全文转简体，selfcheck 会按繁体字数卡（>15 种＝硬错误）。\n",
+        f"4. 注入内容可能含广告法禁用词，逐字对照禁用词表后再交付。\n",
+        f"5. **不得新增任何内部坐标**：§X.X、`cases/xx.md`、`references/`、",
+        f"`03 §C1`、`（作者49）`、`模式 NN`、`composer.py`、`SKILL.md` —— ",
+        f"selfcheck 第【10】关会拦截。\n\n",
+        f"## 三、知识库缺口（要去补的维护待办）\n",
+    ]
+    gaps = uncovered_plays(plays, ind)
+    if gaps:
+        lines.append(f"> 以下 {len(gaps)} 条打法的 `00-打法库` 案例行**未指名品牌**，"
+                     f"因此未能自动注入卡片。交付前二选一：\n")
+        lines.append(f"> ① 去 `references/cases/{ind or '（本行业档）'}` 的「案例清單」"
+                     f"挑 1–2 张，把「品牌＋做了什麼＋結果」抄进骨架；\n")
+        lines.append(f"> ② 补 `references/00-打法库.md` 对应条目 `**案例**` 行的指名品牌"
+                     f"（一次性修复，全库受益）。\n")
+        lines.append(f"> ⛔ 既不补卡片也不补案例行，就在交付稿写"
+                     f"「暂无可直接参照的公开案例」—— **不许编案例**。\n\n")
+        for p, why in gaps:
+            lines.append(f"- **{p['name']}**（打法库 §{p['id']}）—— {why}\n")
+    else:
+        lines.append("> 无缺口：本方案引用的每条打法都指得出具体案例卡。\n")
+    lines.append(f"\n## 四、打法溯源（内部对照用，交付稿里已改为白话）\n")
+    for i, p in enumerate(plays, 1):
+        models, books = theory_for(p, kmap)
+        lines.append(f"- 打法 {i} `{p['name']}` → 打法库 §{p['id']}；"
+                     f"模型 {', '.join(models) or '—'}；"
+                     f"书籍 {', '.join(_book(b) for b in books) or '—'}\n")
+        for cf, c, src in pick_cards_ex(p, ind, limit=2):
+            lines.append(f"    - 案例卡（`{cf}`）：{card_line(cf, c, 200)}〔{src}〕\n")
+    lines.append("\n## 五、交付自检单（12 项 —— 原样输出到回复里，不要放进文档）\n")
+    lines.append("| # | 自检项 | 结果 |\n|---|---|---|\n")
+    for n, r in enumerate(SELFCHECK_ROWS, 1):
+        lines.append(f"| {n} | {r} | 【填】 |\n")
+    return "\n".join(lines)
+
+
+def _dump(path, text):
+    """寫檔（自動建父目錄）—— 免去「目錄不存在」這類低級失敗。"""
+    d = os.path.dirname(os.path.abspath(path))
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -765,6 +947,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--tier", default="标准", choices=["速览", "标准", "G端"])
     ap.add_argument("--top", type=int, default=5)
+    ap.add_argument("--internal", default="",
+                    help="額外輸出「內部施工說明」到這個路徑（施工要求／知識庫缺口／"
+                         "打法溯源／自檢單）。**這份不進交付稿**，只給執行 AI 與維護者看。")
     a = ap.parse_args()
     a.top = max(3, min(7, a.top))   # 打法數鎖在 3–7（與 SKILL「3–7 條為宜」一致）
 
@@ -781,6 +966,7 @@ def main():
         sys.exit(1)
     kmap = json.loads(read(KMAP))
     load_model_names(os.path.join(REF, "03-方法论操作手册.md"))
+    load_books(os.path.join(REF, "cases", "49-营销书籍与作者.md"))
     plays = parse_playbook(read(PLAYBOOK))
     if not plays:
         print("❌ 解析 00-打法库 失败（0 条打法）")
@@ -795,13 +981,21 @@ def main():
     cardpoints = infer_cardpoints(gate)
     picked = select_plays(plays, rules.get("gate", {}), kmap, a.top, cardpoints)
     md = build_skeleton(rules, picked, kmap, a.tier, cardpoints)
-    with open(a.out, "w", encoding="utf-8") as f:
-        f.write(md)
+    _dump(a.out, md)
+    print(f"✅ 已生成骨架（交付稿用）：{a.out}")
 
-    print(f"✅ 已生成骨架：{a.out}")
+    if a.internal:
+        ind = infer_industry(rules.get("gate", {}), kmap)
+        _dump(a.internal, build_internal(rules, picked, kmap, ind, a.tier,
+                                         datetime.date.today().isoformat()))
+        print(f"✅ 已生成内部施工说明（**不进交付稿**）：{a.internal}")
+    else:
+        print(f"{WARN} 未指定 --internal：施工说明／知识库缺口／自检单**没有落盘**"
+              f"（建议补 `--internal <路径>`，执行 AI 才知道要补什么）")
+
     print(f"   档位：{a.tier} ｜ 识别卡点：{'／'.join(cardpoints)} ｜ 注入打法 {len(picked)} 条")
     for i, p in enumerate(picked):
-        print(f"   {i+1}. {p['name']}（§{p['id']}·{p['major']}类）")
+        print(f"   {i+1}. {_t2s_light(p['name'])}")
     print("   → 下一步：模型只填【填】处；再跑 run_pipeline 出稿。")
 
 

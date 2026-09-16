@@ -25,6 +25,20 @@ import sys
 
 OK, NG, WARN = "✅", "❌", "⚠️"
 
+# 繁→简单字表（与 composer 共用 `scripts/t2s_data.py`，机械生成、零依赖）
+def _load_t2s():
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        from t2s_data import T2S_PAIRS as _P
+        return {_P[i]: _P[i + 1] for i in range(0, len(_P) - 1, 2)}
+    except Exception:
+        return {}
+
+
+_T2S_MAP = _load_t2s()
+
 # 結構清單（關鍵詞寬鬆匹配，命中任一即可）
 # 三元組 = (名稱, 關鍵詞, 是否僅「完整版」需要)
 #   —— 用戶定調（2026-09-14）：交付結構由用戶選（**精煉版**／**完整版**）
@@ -309,30 +323,49 @@ def main():
             print(f"  {WARN} 診斷未見「問題類型（A–H）」歸類")
         warnings.append("診斷缺「問題類型（A–H）」——見 SKILL.md 第 2 步分類表（認知/交易/渠道/信任/復購/定價/組織/合規）")
 
-    # 7c 風險掛失敗歸因編號 —— 警告
-    modes = re.findall(r"模式\s*\d{1,2}", text)
-    if modes:
+    # 7c 風險四件套 —— 警告
+    #    2026-09-17：不再要求掛「模式 NN」編號（那是內部座標，客戶看不懂，第【10】關會攔）。
+    #    改為檢查風險本身寫全了沒：為什麼會發生／預警信號／兜底預案／預防動作。
+    _rk = re.search(r"^#{1,4}\s*[^\n]*[风風][险險](.*?)(?=^#{1,2}\s|\Z)", text, flags=re.S | re.M)
+    _rt = _rk.group(1) if _rk else ""
+    _r4 = [k for k in ("预警信号", "預警信號", "兜底预案", "兜底預案",
+                       "预防动作", "預防動作", "为什么会发生", "為什麼會發生") if k in _rt]
+    if _rt and len(_r4) >= 3:
         if not quiet:
-            print(f"  {OK} 風險已對照失敗歸因總庫（{'、'.join(sorted(set(modes))[:6])}）")
+            print(f"  {OK} 風險四件套已寫（{'／'.join(_r4[:4])}）")
+    elif _rt:
+        if not quiet:
+            print(f"  {WARN} 風險只寫了 {len(_r4)}/4 件套")
+        warnings.append("風險清單每條要寫全四件套：為什麼會發生／預警信號／兜底預案／預防動作"
+                        "（內部可對照失敗歸因總庫，但交付稿裡**不要**寫「模式 NN」編號）")
     else:
         if not quiet:
-            print(f"  {WARN} 風險未掛「模式 NN」編號")
-        warnings.append("風險自檢未掛「模式 NN」——請對照 04-失败归因总库.md 逐條標註（如「時機錯誤（模式 08）」）")
+            print(f"  {WARN} 未找到風險章節，跳過")
+        warnings.append("未找到風險章節，無法校驗風險四件套")
 
-    # 7d 可抄案例引用 —— 警告
-    case_refs = re.findall(r"(?:case\s*\d+|cases/\d{2})", text)
-    if case_refs:
-        # 2026-09-16：引用之外必須展開（別人怎麼做的）—— 只留卡片號＝不合格
-        expanded = re.search(r"(別人怎麼做|别人怎么做|他面對什麼|他面对什么|怎麼用|怎么用|具體做了什麼|具体做了什么)", text)
+    # 7d 可抄案例 —— **必須有品牌＋有做法＋有結果**（2026-09-17 改）
+    #    舊版看的是「有沒有寫 `cases/xx.md` 路徑」，那等於鼓勵把內部路徑寫進交付稿。
+    #    新版看的是**內容**：拿得出品牌名嗎？說得出結果數字嗎？
+    _cms = list(re.finditer(r"可抄案例", text))
+    _weak = []
+    for _n, _m in enumerate(_cms, 1):
+        seg = text[_m.start():_m.start() + 400]
+        has_brand = bool(re.search(r"\*\*[^*]{2,24}\*\*", seg))
+        has_result = bool(re.search(r"结果|結果|率|增长|增長|提升|万|萬|%|倍", seg))
+        if not (has_brand and has_result):
+            _weak.append(_n)
+    if _cms and not _weak:
         if not quiet:
-            print(f"  {OK} 已引用案例庫可抄案例（{len(case_refs)} 處）"
-                  + ("，且已展開成文字" if expanded else ""))
-        if not expanded:
-            warnings.append("可抄案例只有卡片號、未展開成文字 —— 須寫清「別人怎麼做的＋我們怎麼用」（用戶 2026-09-16 糾正）")
+            print(f"  {OK} 可抄案例均含「品牌＋做法＋結果」（{len(_cms)} 處）")
+    elif _cms:
+        if not quiet:
+            print(f"  {WARN} 第 {_weak} 處可抄案例缺品牌或缺結果")
+        warnings.append("可抄案例要寫「**品牌** —— 他做了什麼 ▶ 結果：數字」，"
+                        "只有品牌沒結果（或只有做法沒品牌）都不算可抄")
     else:
         if not quiet:
-            print(f"  {WARN} 未引用案例庫可抄案例")
-        warnings.append("打法組合建議加「可抄案例」（引用 cases/01–50 的具體卡片）——628 張卡應被調用")
+            print(f"  {WARN} 未見可抄案例段落")
+        warnings.append("打法組合建議加「可抄案例」（寫清別人怎麼做的、結果如何、我們怎麼用）")
 
     # 7e 每條打法的「具體動作」須精準到每一步（≥3 個編號步驟）—— 硬錯誤
     #    用戶 2026-09-16：「策劃具體操作流程還是沒寫好，要詳細精準到每一步 —— 指策劃案的打法和實操」
@@ -351,110 +384,107 @@ def main():
                 "（動作／誰做／時間／物料·話術／產出），不能只寫一句話"
             )
 
-    # 8) 知識庫強制引用（2026-09-16 新增：對齊 SKILL.md 第 2 篇「知識庫強制引用」callout）
-    #    根因：SKILL.md 文字層早已要求引用 打法庫/03/49，但生成時常被整篇忽略，
-    #    造成「skills 有很多內容但沒運用到策劃」——本塊把它變成機械硬門檻（不通過＝不出稿）。
+    # 8) 知識展開度（2026-09-17 **反轉**）
+    #
+    #    舊版**強制**交付稿掛「打法库 §X.X」「03 模型碼」「（作者49）」——結果就是客戶
+    #    拿到一份滿是內部座標的稿：看不懂、也查不到。用戶原話：
+    #      「不是只是引用了就行了，說有什麼理論是沒有任何意義的 —— 要寫具體的操作」
+    #      「交付出來的東西應該是可以直接看的，而不是有例如像（打法库 §4.1）這樣的引用」
+    #
+    #    新規則：**知識必須寫成內容，座標一律不得出現**。
+    #      · 8a 每條打法的「為什麼這麼做」必須是**寫開的內容**（不是編號、不是【填】）
+    #      · 8b 策略篇必須真的用到 ≥3 個理論（用 03 手冊的**模型中文名**驗，不看編號）
+    #      · 8c 全文 ≥1 處書籍觀點（《書名》＋主張）
+    #      · 座標本身的攔截 → 第【10】關
     if not quiet:
-        print("\n【8】知識庫強制引用（打法庫 §X.X ／ 03 模型 ／ 49 學者《書名》）")
+        print("\n【8】知識展開度（理論／案例須寫成可執行內容，不得只留編號）")
 
     _ref_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references")
     _m03 = os.path.join(_ref_dir, "03-方法论操作手册.md")
 
-    # 8.0 讀 03 模型碼集合（用來確認引用的是真模型，不是自己編的碼）
-    valid_codes = set()
-    if os.path.exists(_m03):
-        try:
-            _t = read(_m03)
-            for _m in re.findall(r"^###\s*([A-Ma-m]\d{1,2})[｜|·\s]", _t, flags=re.M):
-                valid_codes.add(_m.upper())
-        except Exception:
-            pass
-    if not valid_codes and not quiet:
-        print(f"  {WARN} 找不到 {_m03}，改為僅查格式（不驗證模型碼真偽）")
-
-    def _find_codes(t):
-        raw = re.findall(r"03\s*[·§]?\s*([A-Ma-m]\d{1,2})", t)
-        raw += re.findall(r"[（(]\s*模型\s*([A-Ma-m]\d{1,2})", t)
-        raw += re.findall(r"[（(]\s*([A-Ma-m]\d{1,2})\s*[）)]", t)
-        codes = {c.upper() for c in raw}
-        if valid_codes:
-            codes &= valid_codes
-        return codes
-
-    # 8a 每條打法必須掛 打法庫 §X.X
-    play_blocks = re.split(r"(?m)^\*\*打法\s*\d+", text)
-    if len(play_blocks) > 1:
-        missing_lib = 0
-        for blk in play_blocks[1:]:
-            if not re.search(r"打法[庫库]\s*§\s*\d+\.\d+", blk):
-                missing_lib += 1
-        if missing_lib == 0:
+    # 8a 每條打法的「為什麼這麼做」必須展開成實質內容（≥25 個實字）
+    _pb = re.split(r"(?m)^\*\*打法\s*\d+", text)
+    if len(_pb) > 1:
+        _thin = []
+        for i, blk in enumerate(_pb[1:], 1):
+            m = re.search(r"(?:为什么这么做|为什么這麼做|理论依据|理論依據)[^\n]*?[：:]\s*(.+)", blk)
+            body = (m.group(1) if m else "").strip()
+            solid = len(re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", body))
+            if solid < 25:
+                _thin.append(i)
+        if _thin:
             if not quiet:
-                print(f"  {OK} 每條打法均掛 打法庫 §X.X 引用（{len(play_blocks)-1} 條）")
+                print(f"  {NG} 打法 {_thin} 的「為什麼這麼做」沒寫開（<25 實字）")
+            hard_errors.append(
+                f"打法 {_thin} 的「為什麼這麼做」只有編號或空話 —— 必須寫成客戶看得懂的內容"
+                "（這套動作背後的道理是什麼、照著改為什麼不會跑偏），不能只寫理論名稱"
+            )
         else:
             if not quiet:
-                print(f"  {NG} 有 {missing_lib} 條打法未掛 打法庫 §X.X 引用")
-            hard_errors.append(
-                f"打法組合中有 {missing_lib} 條未引用 00-打法库 §X.X —— 每條打法必須從打法庫拉出具體做法（SKILL.md 第 2 篇）"
-            )
+                print(f"  {OK} 每條打法的「為什麼這麼做」都已展開（{len(_pb)-1} 條）")
     else:
         if not quiet:
-            print(f"  {WARN} 未找到「**打法 N」分段，跳過打法庫引用校驗")
-        warnings.append("未找到打法組合分段，無法校驗「每條打法掛打法庫 §X.X」")
+            print(f"  {WARN} 未找到「**打法 N」分段，跳過")
+        warnings.append("未找到打法組合分段，無法校驗「為什麼這麼做」是否展開")
 
-    # 8b 策略篇 ≥3 個 03 模型碼（按「策略」章標題切，兼容完整版/精煉版的不同編號）
+    # 8b 策略篇須真的用到 ≥3 個理論 —— 用 03 手冊的**模型中文名**比對（不認編號）
+    # 03 手冊是**繁體**，交付稿已轉簡體 —— 不轉換就一個都匹配不上（实测只识别到 2 个）
+    def _s2cn(x):
+        return "".join(_T2S_MAP.get(c, c) for c in x)
+
+    _names = {}
+    if os.path.exists(_m03):
+        try:
+            for m in re.finditer(r"^###\s*([A-Ma-m]\d{1,2})[｜|·\s]+([^\n（(]+)",
+                                 read(_m03), flags=re.M):
+                nm = _s2cn(m.group(2).strip())
+                if len(nm) >= 2:
+                    _names[m.group(1).upper()] = nm
+        except Exception:
+            pass
     _ms = re.search(r"^#{1,4}\s*[^\n]*策略(.*?)(?=^#{1,2}\s*[^\n]*定位|\Z)", text, flags=re.S | re.M)
     _strat = _ms.group(1) if _ms else text
-    _scodes = _find_codes(_strat)
-    if len(_scodes) >= 3:
+    _hit_names = sorted({nm for nm in _names.values() if nm in _strat})
+    if len(_hit_names) >= 3:
         if not quiet:
-            print(f"  {OK} 策略篇引用 {len(_scodes)} 個 03 模型（{', '.join(sorted(_scodes)[:8])}…）")
+            print(f"  {OK} 策略篇用到 {len(_hit_names)} 個理論（{'、'.join(_hit_names[:6])}…）")
     else:
         if not quiet:
-            print(f"  {NG} 策略篇只引用 {len(_scodes)} 個 03 模型（需 ≥3）")
+            print(f"  {NG} 策略篇只用到 {len(_hit_names)} 個理論（需 ≥3）")
         hard_errors.append(
-            f"策略篇引用 03 模型不足（{len(_scodes)}/3）——必須標明出處引用 ≥3 個 03-方法论操作手册 模型（如「場景方法論（03 §G3）」）"
+            f"策略篇只識別出 {len(_hit_names)} 個理論（需 ≥3）——理論要**寫進做法裡**"
+            "（說清楚這套動作背後用的是什麼道理），不是列一串理論名稱"
         )
 
-    # 8c 全文 ≥1 處 49 學者 / 《書名》（排除內部文檔名稱，如《任務規則表》《交付自檢單》）
+    # 8c 全文 ≥1 處書籍觀點（《書名》＋主張）；排除內部文檔名
     _block_book = ("規則表", "规则表", "自檢單", "自检单", "規則", "规则")
     _books = [b for b in re.findall(r"《[^》]{1,40}》", text) if not any(x in b for x in _block_book)]
     if _books:
         if not quiet:
-            print(f"  {OK} 引用書籍/學者 {len(_books)} 處（如 {_books[0]}）")
+            print(f"  {OK} 引用書籍觀點 {len(_books)} 處（如 {_books[0]}）")
     else:
         if not quiet:
-            print(f"  {NG} 全文未引用任何 49 學者觀點或《書名》")
-        hard_errors.append(
-            "未引用任何 49-營銷書籍與作者 觀點（需 ≥1 處，如「《定位》（里斯&特勞特，49）」）"
-        )
+            print(f"  {NG} 全文未見任何書籍觀點")
+        hard_errors.append("未引用任何書籍觀點（需 ≥1 處：《書名》＋它的核心主張，寫進做法依據裡）")
 
-    # 8d 第三篇 定位 ≥2 個定位/品牌理論（按「定位與口徑」章標題切，兼容繁/簡與不同編號）
+    # 8d 定位篇：≥1 個定位理論關鍵詞（警告 —— 不掛編號後不再強制模型碼）
     _mp = re.search(r"^#{1,4}\s*[^\n]*定位[與与]口[徑径](.*?)(?=^#{1,2}\s|\Z)", text, flags=re.S | re.M)
     _pos = _mp.group(1) if _mp else ""
     _pos_kw = ["定位", "品牌資產", "品牌资产", "視覺錘", "视觉锤", "超級符號", "超级符号",
                "USP", "獨特賣點", "独特卖点", "品類", "心智", "里斯", "特勞特", "凱勒",
                "華與華", "馮衛東", "江南春", "CBBE", "對立定位", "場景"]
-    _pos_codes = _find_codes(_pos) if _pos else set()
-    # 定位/品牌類模型碼（B 章品牌定位、C1 超級符號、C12 視覺錘、G7 品類戰略、A8 GROW）
-    _pos_rel = _pos_codes & ({"B%d" % i for i in range(1, 10)} | {"C1", "C12", "G7", "A8"})
     _kw_signals = {k for k in _pos_kw if k in _pos}
-    _pos_books = re.findall(r"《[^》]{1,40}》", _pos)
-    # 收緊：必須有「真定位模型碼 ≥1」＋（定位理論關鍵詞 or 定位類書 ≥1）；純堆關鍵詞不算
-    if _pos and _pos_rel and (_kw_signals or _pos_books):
+    if _pos and _kw_signals:
         if not quiet:
-            print(f"  {OK} 第三篇定位理論引用（模型 {'、'.join(sorted(_pos_rel))}；信號 {len(_kw_signals)} 詞/書 {len(_pos_books)} 本）")
+            print(f"  {OK} 定位篇理論關鍵詞 {len(_kw_signals)} 個")
     elif _pos:
         if not quiet:
-            print(f"  {NG} 第三篇定位理論不足（需 ≥1 個定位模型碼 ＋ ≥1 個定位理論詞/書）")
-        hard_errors.append(
-            "第三篇 定位與口徑 須引用 **≥1 個定位/品牌模型碼**（如 03 §B5／§C1／§C12）＋ **≥1 個定位理論**"
-            "（關鍵詞或《定位》《搶佔心智》等）—— 只堆關鍵詞不算"
-        )
+            print(f"  {WARN} 定位篇未見定位理論關鍵詞")
+        warnings.append("定位篇建議點明用的是哪一套定位理論（並說清楚怎麼用在這一步）")
     else:
         if not quiet:
             print(f"  {WARN} 未找到第三篇定位章節，跳過")
-        warnings.append("未找到第三篇 定位與口徑，無法校驗定位理論引用")
+        warnings.append("未找到第三篇 定位與口徑，無法校驗定位理論")
 
     # 9) 交付稿須簡體（SKILL.md 硬要求）—— 偵測繁體字
     #    只做警告：專業名詞可能含繁體，且 composer 骨架本就注入繁體（交付前需本地化）
@@ -468,6 +498,46 @@ def main():
         # 改為硬錯誤（2026-09-16）：SKILL 明定交付稿必須簡體，只警告＝繁體稿照樣能出 → 規則形同虛設
         hard_errors.append(f"交付稿疑似繁體（{len(hit_trad)} 種繁體字：{'、'.join(hit_trad[:10])}…）"
                            f"—— SKILL 要求對外交付稿用**簡體**，請本地化後重跑")
+
+    # 10) 交付稿潔淨度 —— 硬錯誤（2026-09-17 新增）
+    #
+    #    這關是整套改造的**收口**：前面把座標從骨架裡拿掉了，這裡確保模型補寫時
+    #    也不會把座標加回來。出現任何一條 → 不准出稿。
+    #    客戶不需要知道我們內部怎麼編號、檔案放在哪、用了哪個腳本。
+    if not quiet:
+        print("\n【10】交付稿潔淨度（不得出現任何內部座標）")
+    _coord_pats = [
+        (r"§\s*\d", "章節編號（§X.X）"),
+        (r"cases/\d{2}-", "案例庫檔案路徑"),
+        (r"references/", "references 目錄路徑"),
+        (r"打法[庫库]", "「打法库」內部檔名"),
+        (r"03\s*[·§]?\s*[A-Ma-m]\d", "03 模型碼"),
+        (r"模型\s*[A-Ma-m]\d{1,2}", "模型碼"),
+        (r"49\s*[）)]", "49 書籍編號"),
+        (r"模式\s*\d{1,2}", "失敗歸因「模式 NN」編號"),
+        (r"(?:composer|selfcheck|build_docx|run_pipeline|gate_check|kb_audit)\.py", "腳本檔名"),
+        (r"(?:SKILL|AGENTS)\.md", "內部文檔檔名"),
+        (r"knowledge_map", "內部映射表檔名"),
+        (r"方法论操作手册|方法論操作手冊", "內部手冊檔名"),
+    ]
+    _coord_hits = []
+    for _pat, _label in _coord_pats:
+        for _m in re.finditer(_pat, text):
+            _coord_hits.append((text[:_m.start()].count("\n") + 1, _label, _m.group(0).strip()[:24]))
+    if _coord_hits:
+        if not quiet:
+            print(f"  {NG} 發現 {len(_coord_hits)} 處內部座標：")
+            for _ln, _label, _raw in _coord_hits[:10]:
+                print(f"     · 第 {_ln} 行【{_label}】{_raw}")
+        hard_errors.append(
+            f"交付稿出現 {len(_coord_hits)} 處內部座標（"
+            + "、".join(sorted({x[1] for x in _coord_hits}))
+            + f"）——客戶看不懂也不需要看。改成可讀的內容；"
+            f"溯源訊息請寫進 `composer.py --internal` 那份文件裡"
+        )
+    else:
+        if not quiet:
+            print(f"  {OK} 無內部座標（客戶可直接閱讀／提交）")
 
     # 結論
     print("\n" + "=" * 64)

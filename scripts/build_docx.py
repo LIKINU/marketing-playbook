@@ -206,10 +206,22 @@ def render_markdown(doc, md_text):
         # 列表
         m_list = re.match(r"^(\s*)([-*]|\d+[.、)])\s+(.*)$", ln)
         if m_list:
-            indent, text = len(m_list.group(1)), m_list.group(3)
-            p = add_paragraph_with_bold(doc, "・" + text, size=10.5)
+            indent, marker, text = len(m_list.group(1)), m_list.group(2), m_list.group(3)
+            # ⚠️ 2026-09-17 修正：原先把**所有**列表項的標記一律換成「・」，
+            #    導致有序列表的編號（1. 2. 3.…）全部丟失 —— 打法/步驟類內容
+            #    在 Word 裡變成一串沒有序號的圓點段落，用戶實測反饋「看起來像表格生成壞了」。
+            #    修正：有序列表保留原始編號，僅無序列表用「・」。
+            if marker[0].isdigit():
+                num = re.match(r"\d+", marker).group(0)
+                body = num + ". " + text
+            else:
+                body = "・" + text
+            p = add_paragraph_with_bold(doc, body, size=10.5)
             if indent >= 2:   # 嵌套列表：按縮進層級縮排（舊版一律壓平）
                 p.paragraph_format.left_indent = Cm(0.5 * (indent // 2))
+            elif marker[0].isdigit():   # 有序列表：懸掛縮排，數字與正文對齊
+                p.paragraph_format.left_indent = Cm(0.55)
+                p.paragraph_format.first_line_indent = Cm(-0.55)
             i += 1
             continue
 

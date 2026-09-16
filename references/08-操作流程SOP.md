@@ -29,7 +29,7 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 | S0 啟動盤點 | 人/AI | `python scripts/flow.py` | 現狀盤點 | 能力不足 → 按 AGENTS §四 降級 |
 | S1 門禁 | 人/AI | `python scripts/gate_check.py rules.json` | 《任務規則表》 | 缺項 → **禁止產出方案內容** |
 | S2 事實收集 | AI | （連接器/文件；先盤點工具） | 事實底稿 | 缺數據 → 標【未核實】、不得進交付物 |
-| S3 組裝骨架 | **腳本** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier …` | `skeleton.md`（打法/模型/學者/案例**已注入**） | 解析失敗 → 退出碼 2 |
+| S3 組裝骨架 | **腳本** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier … --internal skeleton.internal.md` | `skeleton.md`（打法/理論/案例**已注入且已轉簡體**）＋ `skeleton.internal.md`（施工說明，**不進交付稿**） | 解析失敗 → 退出碼 2 |
 | **S3.5 多 Agent 分工** | **人/AI 協作** | 五角色（策略／品牌／觸達／文案／財務風控）各寫各的、互不看草稿 → 填 `roles.json` | `roles.json` | `role_check.py` 不過 → **不出稿** |
 | S4 填空在地化 | **模型** | （只補 `【填】`；繁體→簡體） | `plan.md` | 殘留 `【填】` 或**繁體** → S5 判硬錯誤 |
 | S5 交付自檢 | **腳本** | `python scripts/selfcheck.py plan.md` | 自檢報告 | 任一硬錯誤 → 退出碼 1，**不得交付** |
@@ -71,7 +71,8 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 - **輸入**：`rules.json`
 - **命令**：
   ```bash
-  python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5
+  python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5 \
+      --internal skeleton.internal.md
   #  --tier  速览 | 标准 | G端        --top  打法條數（3–7）
   ```
 - **腳本做什麼（確定性，非模型生成）**：
@@ -87,7 +88,8 @@ S0 啟動盤點 ─▶ S1 門禁13項 ─▶ S2 事實收集 ─▶ S3 組裝骨
 - **何時**：骨架出來後
 - **輸入**：`skeleton.md`
 - **動作（只做三件）**：
-  1. 補 `【填】` 處：**卡點重構句**（「不是 X——是 Y」）／**KPI 目標數字**／**預算明細**（分項加總＝合計）／**風險四件套**（每條掛「模式 NN」）／**自檢單** 逐項 ✅
+  1. 補 `【填】` 處：**卡點重構句**（「不是 X——是 Y」）／**KPI 目標數字**／**預算明細**（分項加總＝合計）／**風險四件套**（為什麼會發生／預警信號／兜底預案／預防動作）／**自檢單** 逐項 ✅
+     ⛔ 補寫時**不得**加入 `§X.X`／`（03 §C1）`／`cases/xx.md`／`模式 NN` 等内部坐标（selfcheck 第【10】關會攔）
   2. 把注入的**繁體原文本地化為簡體**，逐字對照禁用詞表
   3. ⛔ **不得刪改注入的打法／理論依據／可抄案例** —— 那是 skill 的強制輸出
 - **產出**：`plan.md`

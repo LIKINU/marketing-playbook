@@ -150,7 +150,7 @@
 | 判斷**外包還是自己幹** | `references/06-选流派矩阵与对照表.md` |
 | 選乙方、看某家做過什麼 | `references/cases/46-50`（機構案例與出版物，已統一為案例卡格式；原機構檔案已退役） |
 | **一接案先跑** | `python scripts/flow.py` — 告訴你「現在第幾步、下一步跑哪條命令」 |
-| **出骨架（知識自動注入）** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier 速览\|标准\|G端` |
+| **出骨架（知識自動注入）** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier 速览\|标准\|G端 --internal skeleton.internal.md`（`--internal` 那份是施工说明，**不进交付稿**） |
 | **一步步怎麼操作** | `references/08-操作流程SOP.md` — 接案到出稿每一步的 輸入／命令／產出／校驗 |
 | **不知道「寫到什麼程度算夠」** | `references/07-质量范式-便利店开学季案.md` — ⭐ 質量標尺（角色產出規格／骨架模板／可校驗指標／好方案的硬門檻） |
 | **想看成品長什麼樣** | `references/范例/` — 交付稿樣張 `.md`＋`.docx`，另附**輸入文件樣張**（任務規則表／預算表 `.json`） |

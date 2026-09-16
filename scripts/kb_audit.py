@@ -85,6 +85,12 @@ def l1(quiet):
             if any(s in raw for s in REF_SKIP) or raw.startswith(("python ", "$ ", "bash ")):
                 skipped += 1
                 continue
+            # 佔位寫法（`cases/xx.md`、`cases/NN-行业.md`）—— 是「舉例說明長什麼樣」，
+            # 不是真實引用。2026-09-17：文檔開始教「不要寫這種座標」，這類舉例暴增。
+            _fn = os.path.basename(raw)
+            if re.match(r"^(?:xx|XX|NN|N+|X+)[\-_.]", _fn):
+                skipped += 1
+                continue
             total += 1
             cands = [os.path.join(ROOT, raw),
                      os.path.join(base_dir, raw),
@@ -241,13 +247,22 @@ def l4(quiet):
     t = read(out)
     # 卡片摘要行的出處標記用**全形括號**（`（`cases/xx.md`）`）—— 第一版用半形 `\(` 去數，
     # 結果 count 恆為 0，差點又把「兩邊都 0」誤讀成「沒注入」（這種 bug 正是本腳本要防的）。
-    injected = len(re.findall(r"[（(]`cases/[^`]+\.md`[）)]", t))
-    placeholder = len(re.findall(r"尚无可引用的指名卡片|请展开", t))
-    no_case = len(re.findall(r"知识库缺口", t))
+    # 2026-09-17：交付稿**不再帶 `cases/xx.md` 路徑**（那是內部座標，客戶看不懂）。
+    #   所以「有沒有真的注入」不能再靠數路徑 —— 改成數**真實卡片內容**：
+    #   `**品牌** —— 他做了什麼 ▶ 结果：數字`
+    injected = len(re.findall(r"\*\*[^*]{2,24}\*\*\s*——", t))
+    results = len(re.findall(r"▶\s*结果", t))
+    placeholder = len(re.findall(r"暂无可直接参照的公开案例|请展开", t))
+    # 同時查交付稿是否殘留內部座標（與 selfcheck 第【10】關同一套判據）
+    coords = len(re.findall(r"§\s*\d|cases/\d{2}-|打法[庫库]|"
+                            r"03\s*[·§]\s*[A-Ma-m]\d|模式\s*\d{1,2}", t))
     if not quiet:
         print(f"  L4 交付物注入：骨架 {len(t)} 字｜真實卡片內容 **{injected} 處**"
-              f"｜占位符 {placeholder} 處")
-    return placeholder, injected
+              f"（含結果數字 {results} 處）｜占位符 {placeholder} 處"
+              f"｜**殘留內部座標 {coords} 處**")
+        if coords:
+            print(f"     ✗ 交付稿出現內部座標 —— 客戶看不懂，selfcheck 第【10】關會攔")
+    return placeholder + coords, injected
 
 
 # ── L5：模型引用可解析（死條目掃描）──────────────────────────
@@ -288,7 +303,7 @@ def l5(quiet):
         if unreachable:
             print(f"     ✗ 永遠挑不到：{'、'.join(unreachable[:24])}")
     # 斷鏈＝死條目（引用不存在的碼）＋ 永遠挑不到（引用了卻浮不上來）
-    return len(dead) + len(unreachable), total_models, unused
+    return len(dead) + len(unreachable), total_models, unused, total_models - len(unreachable)
 
 
 # ── L7：私有痕跡掃描（公開倉庫紅線）──────────────────────────
@@ -367,7 +382,7 @@ def main():
             print("  L4 交付物注入：（--no-compose，跳過）")
     else:
         f4, inj = l4(q)
-    f5, t5, unused5 = l5(q)
+    f5, t5, unused5, reach5 = l5(q)
     if not q:
         print("  L6 全量回歸（6 個既有腳本）：")
     f6, t6 = l6(q)
@@ -389,7 +404,7 @@ def main():
         ("L3 含本行業卡的組數（品質指標）", tp3 - i3, tp3),
         ("L3 覆蓋到的卡片數（覆蓋率）", t3 - cov3, t3),
         ("L5 模型未被映射表用到（覆蓋率，非要求）", unused5, t5),
-        ("L5 模型能被挑中（可達率，越高越好）", 0, t5),
+        ("L5 模型能被挑中（可達率，越高越好）", reach5, t5),
     ]
     total_bad = sum(x[1] for x in rows)
     for name, bad, tot in rows:

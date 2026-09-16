@@ -120,7 +120,8 @@ python scripts/flow.py --dir 案子目錄      # 告訴你「現在第幾步、�
 > → 所以**知識由腳本機械注入，不靠模型自願引用**。
 
 ```bash
-python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5
+python scripts/composer.py --rules rules.json --out skeleton.md --tier 标准 --top 5 \
+    --internal skeleton.internal.md      # ← 施工说明/缺口/自检单，不进交付稿
 #  --tier  速览 | 标准 | G端
 ```
 

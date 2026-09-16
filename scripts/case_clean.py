@@ -184,7 +184,9 @@ def main():
     for f in files:
         base = os.path.basename(f)
         m = re.match(r"(\d+)", base)
-        if m and int(m.group(1)) in EXEMPT_SKIP:
+        if not m:
+            continue          # 非編號檔（README.md 等）不是案例卡，禁止碰
+        if int(m.group(1)) in EXEMPT_SKIP:
             continue
         d, c = process(f, a.apply, {"identity": IDENTITY, "finance": FINANCE, "all": FORBID}[a.scope])
         tot_d += d

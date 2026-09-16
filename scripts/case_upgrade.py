@@ -51,7 +51,10 @@ def main():
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(ROOT, "references", "cases", "*.md")))
-    files = [f for f in files if int(re.match(r"(\d+)", os.path.basename(f)).group(1)) <= 45]
+    def _num(fp):
+        m = re.match(r"(\d+)", os.path.basename(fp))
+        return int(m.group(1)) if m else 999  # 非編號檔（README.md 等）一律排除
+    files = [f for f in files if _num(f) <= 45]
     if a.file:
         files = [f for f in files if os.path.basename(f).startswith(a.file)]
 

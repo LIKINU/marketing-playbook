@@ -60,7 +60,9 @@ def main():
     for f in files:
         base = os.path.basename(f)
         m = re.match(r"(\d+)", base)
-        n = int(m.group(1)) if m else 0
+        if not m:
+            continue          # 非編號檔（README.md 等）不是案例卡，跳過
+        n = int(m.group(1))
         raw = read(f)
         # 標題（品牌名+角度）＝參考對象，不計入「公司背景」違規
         t = "\n".join(l for l in raw.splitlines() if not re.match(r"^#{1,6}\s", l))

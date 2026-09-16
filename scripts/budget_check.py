@@ -140,6 +140,10 @@ def _extract_budget(rows, require_money):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("用法: python budget_check.py <budget.json|plan.md|->")
+        print("  校驗「分項加總 = 合計」；可吃 JSON、含預算表的 Markdown，或 stdin(-)")
+        sys.exit(0)
     if len(sys.argv) < 2:
         print("用法: python budget_check.py <budget.json|plan.md|->")
         sys.exit(1)

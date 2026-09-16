@@ -1038,6 +1038,10 @@ def check_repeats(lines, text):
 
 # ==========================================================================
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("用法: python depth_check.py <plan.md> [--quiet]")
+        print("  只診斷、不阻攔出稿（退出碼一律 0，除非腳本自身出錯=2）")
+        sys.exit(0)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     quiet = "--quiet" in sys.argv
     if not args:

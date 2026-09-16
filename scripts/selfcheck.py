@@ -93,6 +93,10 @@ def emit_json(hard, warns, code):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("用法: python selfcheck.py <plan.md> [--banned banned.json] [--quiet] [--json]")
+        print("  退出碼 0=全過（可交付）｜1=有硬錯誤（不得交付）｜2=腳本出錯")
+        sys.exit(0)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     quiet = "--quiet" in sys.argv
     if not args:

@@ -50,7 +50,16 @@ SAFE_CTX = [   # 語境豁免（2026-09-16）：這些寫法裡「創始人/融�
     r"(萬|億|\d)[^。]{0,6}營收的客戶", r"營收的客戶", r"非營銷背景",
     r"乙方機構", r"按[^。]{0,8}營收", r"營收規模", r"年?營收約",
     r"(虧損|減值|裁員)[^。]{0,10}(風險|條款|適用|同樣)",
+    r"創始人[^。]{0,6}(訪談|專訪|自述|公開信|直播|內部信)",  # 信源類型，非身世
+    r"(已核實|未核實|行業認知)[^】]{0,20}訪談",
 ]
+
+# 純金額子句（無營銷含義的財報數字，如「醬油 149.34 億元」）—— 之前因無財務詞而漏掉
+MONEY = re.compile(r"\d[\d,\.]*\s*(?:億元|亿元|萬億|万亿|億美元|亿美元|億港元|億日圓|億日元|億|萬|万)")
+# 這些是「營銷金額」：預算/投入/定價/客單/折扣等 —— 帶這些詞的金額要保留
+PRICE_CTX = ["預算", "预算", "成本", "客單", "客单", "售價", "售价", "定價", "定价",
+             "價格", "价格", "投入", "投放", "花費", "花费", "費用", "费用",
+             "補貼", "补贴", "券", "折扣", "單價", "单价", "加盟費", "加盟费", "人力"]
 
 KEEP_MARK = ["銷量", "销量", "市佔", "市占", "曝光", "播放", "熱搜", "热搜", "門店", "门店",
              "復購", "复购", "客流", "下載", "下载", "DAU", "MAU", "用戶數", "用户数",
@@ -81,7 +90,8 @@ def clean_line(ln, forbid=None):
     for part in SPLIT.split(rest):
         has_bg = any(k in part for k in forbid)
         has_mkt = any(k in part for k in KEEP_MARK)
-        if has_bg and not has_mkt and not any(re.search(rx, part) for rx in SAFE_CTX):
+        has_money = bool(MONEY.search(part)) and not any(k in part for k in PRICE_CTX)
+        if (has_bg or has_money) and not has_mkt and not any(re.search(rx, part) for rx in SAFE_CTX):
             dropped += 1
         else:
             kept.append(part)
@@ -125,7 +135,9 @@ def _looks_broken(orig, new):
     if re.search(r"[，、；]\s*[。；]", new):
         return True
     strip = lambda s: re.sub(r"[\s*\-|]", "", s)
-    if len(strip(orig)) >= 24 and len(strip(new)) < 0.3 * len(strip(orig)):
+    # 註：財務子句本來就該被大量刪掉，「刪得多」不等於「改爛」。
+    #     只有當剩下的字**少到不成句**（<12 字）才當殘句。結構問題另有括號/粗體/殘詞三道檢查。
+    if len(strip(new)) < 12:
         return True
     return False
 

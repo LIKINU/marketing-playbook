@@ -26,6 +26,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import composer as C  # noqa: E402
+from _common import OK, NG, WARN, HINT, INFO  # noqa: E402
 import paradigm_data as P  # noqa: E402
 
 REF = os.path.join(ROOT, "references")

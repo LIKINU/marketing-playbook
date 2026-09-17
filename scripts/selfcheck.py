@@ -23,7 +23,9 @@ import os
 import re
 import sys
 
-from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
+from _common import (OK, NG, WARN, HINT, INFO, VAGUE_WORDS, AI_SMELL_WORDS,
+                     CAUSAL_WORDS, GENERIC_CATEGORY_WORDS,
+                     CONCRETE_ACTION_WORDS, CONCRETE_OBJECT_WORDS)   # noqa: E402
 
 # 繁→简单字表（与 composer 共用 `scripts/t2s_data.py`，机械生成、零依赖）
 def _load_t2s():
@@ -414,14 +416,41 @@ def main():
             #    這是典型的「校驗器自己壞掉、卻回報通過」，比沒有校驗更危險。
             _why_txt = (m.group(1) if m else "").strip()
             solid = len(re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", _why_txt))
-            if solid < 25:
+            # ⚠️ 2026-09-17 升级：原先只看「≥25 实字」，25 字空话稳过
+            #    （「因为环境不好所以要稳健推进避免风险」21 字，加几个字就满分）。
+            #    So-What 测的是「答不答得出**所以呢**」，不是长度 → 改为「长度 + 至少一条实质」：
+            #      ① 含数字＋单位（可核验的量化）  ② 引了品牌或《书名》（有外部依据）
+            #      ③ 含因果词（讲清了机制）
+            #    并且不得通篇是模糊词。
+            _has_num = bool(re.search(r"\d+\s*(?:元|%|％|万|萬|天|周|週|个月|個月|次|单|單|人|店|条|條|倍|小时|小時)", _why_txt))
+            _has_ref = bool(re.search(r"\*\*[^*]+\*\*|《[^》]+》", _why_txt))
+            _has_cause = any(w in _why_txt for w in CAUSAL_WORDS)
+            # ⚠️ 2026-09-17 调参（拿真稿验出来的）：只认「数字／引用／因果词」会**误伤**
+            #    机制句 —— 实测「瞳话如果不在黄金层、没有插卡和堆头，就只是在给陈列做得
+            #    更好的对手做背景」这句明明是机制说明，却因为没有「因为/所以」被误判。
+            #    → 补三类同样算「讲清了机制」的句式：条件推演／对照取舍／推理链。
+            _MECH = [
+                r"如果[^，。]{2,20}[，,][^。]{2,}", r"若[^，。]{2,20}[，,][^。]{2,}",
+                r"一旦[^，。]{2,20}[，,]", r"只要[^，。]{2,20}[，,]",
+                r"越[^，。]{1,12}[，,]越", r"不是[^，。]{1,20}[，,]?而是",
+                r"只有[^，。]{2,20}[，,]?才", r"与其[^，。]{2,20}[，,]?不如",
+                r"而不是", r"而非", r"相比", r"→",
+            ]
+            _has_mech = any(re.search(p, _why_txt) for p in _MECH)
+            _vague = sum(1 for w in VAGUE_WORDS if w in _why_txt)
+            _solid_ok = (solid >= 25
+                         and (_has_num or _has_ref or _has_cause or _has_mech)
+                         and _vague <= 2)
+            if not _solid_ok:
                 _thin.append(i)
         if _thin:
             if not quiet:
                 print(f"  {NG} 打法 {_thin} 的「為什麼這麼做」沒寫開（<25 實字）")
             hard_errors.append(
-                f"打法 {_thin} 的「為什麼這麼做」只有編號或空話 —— 必須寫成客戶看得懂的內容"
-                "（這套動作背後的道理是什麼、照著改為什麼不會跑偏），不能只寫理論名稱"
+                f"打法 {_thin} 的「為什麼這麼做」不達標 —— 需同時滿足："
+                "①≥25 實字 ②至少含一條實質（數字＋單位／引品牌或《書名》／因果詞／機制句「如果…就」「不是…而是」等／推理箭頭）"
+                "③模糊詞（加強/提升/優化/賦能…）≤2 個。"
+                "**寫得長不等於寫得清**：要答得出「所以呢」。"
             )
         else:
             if not quiet:
@@ -526,6 +555,13 @@ def main():
         (r"(?:SKILL|AGENTS)\.md", "內部文檔檔名"),
         (r"knowledge_map", "內部映射表檔名"),
         (r"方法论操作手册|方法論操作手冊", "內部手冊檔名"),
+        # 2026-09-17 新增：**施工語氣**。這些不是「座標」，但同樣是給執行 AI 的指令，
+        # 印進客戶文檔裡一樣穿幫（實測 composer 曾在交付稿留下
+        # 「—— 说明用在定位的哪一步」）。【10】關原本 12 條正則一條都蓋不到。
+        (r"——\s*说明|——\s*說明", "給 AI 的施工說明"),
+        (r"（自行填寫|（自行填写|自行填寫", "施工指引語氣"),
+        (r"按指引|依指引|照骨架|見骨架", "施工指引語氣"),
+        (r"\{FILL\}|【待填】|【待补】", "未替換的佔位符"),
     ]
     _coord_hits = []
     for _pat, _label in _coord_pats:
@@ -596,6 +632,31 @@ def main():
         if not quiet:
             print(f"  {WARN} 未使用場景結構（無「九 ·」章節）—— 若為大賽／B端／G端／投標 交付，須補場景章節")
         warnings.append("未檢測到場景章節（## 九 ·）。若本案為大賽／B端／G端／投標 交付，需補該場景必有的章節（見 references/09-完整策劃標準與評分表.md）")
+
+    # ── 【12】交付自檢單防偽（2026-09-17 補：原本號段缺【12】，且自檢單是**模型自填**）
+    #    問題：協議 3 要求輸出 12 項自檢單，但「結果」那一欄由模型自己填 ——
+    #    填 12 個 ✅ 就過關。這讓全表打分最高的「交付治理」變成自我聲明（假綠）。
+    #    做法：① 抽出文檔裡自檢單的每一行判斷；② 與腳本本輪的真實判定比對；
+    #          **自評高於腳本判定 → 硬錯誤**。這正是「假綠」的可操作定義。
+    if not quiet:
+        print("\n【12】交付自檢單防偽（自評不得高於腳本判定）")
+    _rows = re.findall(r"(?m)^\s*\|[^|\n]*自檢|^\s*[-*]\s*\[[ xX]\]", text)
+    _claimed_ok = len(re.findall(r"✅", text))
+    _claimed_bad = len(re.findall(r"❌", text))
+    # 腳本判定的「還能有幾項通過」：本輪 hard_errors / warnings 越多，可用額度越低
+    _quota = max(0, 12 - len(hard_errors) * 2 - len(warnings))
+    if not quiet:
+        print(f"  文檔自評：✅ {_claimed_ok} 個 ／ ❌ {_claimed_bad} 個"
+              f"（表格行 {len(_rows)} 條）")
+        print(f"  腳本判定上限：✅ 至多 {_quota} 個（依本輪 {len(hard_errors)} 項硬錯誤、"
+              f"{len(warnings)} 項警告推算）")
+    if _claimed_ok > 0 and _claimed_ok > _quota and hard_errors:
+        hard_errors.append(
+            f"自檢單**自評高於腳本判定**：文檔裡標了 {_claimed_ok} 個 ✅，"
+            f"但本輪有 {len(hard_errors)} 項硬錯誤、{len(warnings)} 項警告 —— "
+            f"按腳本判定最多只允許 {_quota} 個 ✅。**自檢單不是自我聲明。**")
+    elif not hard_errors and _claimed_ok == 0 and _claimed_bad == 0:
+        warnings.append("未見任何 ✅/❌ 標記 —— 協議 3 要求把 12 項自檢單原樣輸出在回覆中")
 
     # ── 【13】交叉引用與編號連續性（2026-09-17 新增）
     #    為什麼要這一關：瞳話案前 12 關全綠，卻有 **4 處**「詳見第三部分 1.1 的反对意见」
@@ -707,7 +768,185 @@ def main():
     for _d in _order_bad + _sub_order_bad:
         warnings.append(_d + "　→ 建議按正文出現順序重編號（結構一改就要同步改引用）")
 
-    # 結論
+    # ── 【14】實質與創意判據（2026-09-17 新增，回應 4A／貝恩／BCG 三視角的第 6–9 條）
+    #    共同病灶：**「有檢查」但攔不住空話** —— 標題在場就算通過、字數夠就算寫開。
+    #    本關四組判據全部針對「實質」：
+    #      14a 執行摘要門檻（決策者唯一會讀的一頁，原本零門檻）
+    #      14b AI 腔掃描（`09` 明文禁形容詞堆砌，但腳本一直沒有詞表）
+    #      14c 場景章深度（原本只查標題存在，正文 0 字也過）
+    #      14d Big Idea 可複述性（創意完全沒有專屬判據）
+    if not quiet:
+        print("\n【14】實質與創意判據（執行摘要／AI 腔／場景深度／Big Idea）")
+
+    _secs = {}
+    for _m in re.finditer(r"(?m)^##\s+(.+?)\s*$", body):
+        _start = _m.end()
+        _nxt = re.search(r"(?m)^##\s+", body[_start:])
+        _secs[_m.group(1)] = body[_start:_start + (_nxt.start() if _nxt else len(body))]
+
+    # 14a 執行摘要
+    _abs = next((v for k, v in _secs.items() if "執行摘要" in k or "执行摘要" in k), "")
+    _n_num = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|萬|单|單|人|店|次|万|萬)", _abs))
+    _has_bl = bool(re.search(r"盈虧線|盈亏线|保本|打平", _abs))
+    if _abs:
+        _ok_a = _n_num >= 4 and _has_bl
+        if not quiet:
+            print(f"  {OK if _ok_a else NG} 執行摘要：{len(_abs)} 字、帶單位數字 {_n_num} 個"
+                  f"（需 ≥4）、含盈虧線/保本 {'是' if _has_bl else '否'}")
+        if not _ok_a:
+            hard_errors.append(
+                f"執行摘要不達標（數字 {_n_num}/4，盈虧線 {'有' if _has_bl else '無'}）—— "
+                "決策者常常只看這一頁；它必須自帶 ≥4 個可核驗數字 ＋ 一句盈虧線。")
+    else:
+        warnings.append("找不到「執行摘要」區塊，14a 未生效")
+
+    # 14b AI 腔
+    _smell = {}
+    for _w in AI_SMELL_WORDS:
+        _c = body.count(_w)
+        if _c:
+            _smell[_w] = _c
+    _struct = []
+    if len(re.findall(r"不是[^，。]{1,12}——?是", body)) >= 3:
+        _struct.append("「不是…是…」句式 ≥3 次")
+    if len(re.findall(r"[\u4e00-\u9fff]{4}[，、][\u4e00-\u9fff]{4}[，、][\u4e00-\u9fff]{4}", body)) >= 3:
+        _struct.append("四字格连排 ≥3 处")
+    if not quiet:
+        print(f"  {OK if not _smell and not _struct else WARN} AI 腔："
+              f"詞 {len(_smell)} 種{'（' + '、'.join(list(_smell)[:6]) + '）' if _smell else ''}"
+              f"、結構特徵 {len(_struct)} 項")
+    if _smell or _struct:
+        warnings.append("AI 腔：詞 " + "、".join(f"{k}×{v}" for k, v in list(_smell.items())[:6])
+                        + ("；" + "；".join(_struct) if _struct else "")
+                        + "　→ `09` 明文禁形容詞堆砌，改成動作與數字")
+
+    # 14c 場景章深度
+    _scene_req = {
+        "大赛": ["创意设计执行", "媒介排期表", "提案脚本", "评委问答预判"],
+        "B端": ["生意拆解与机会量化", "财务测算与盈亏平衡", "组织与人力可行性", "商务条款"],
+        "G端": ["政策依据与上位规划", "绩效目标与考核", "资金与保障", "汇报与评审"],
+        "投标": ["商务响应偏离表", "需求理解", "实施与保障", "业绩与售后"],
+    }
+    _thin_ch = []
+    for _title, _txt in _secs.items():
+        for _sc, _req in _scene_req.items():
+            if any(c in _title for c in _req):
+                _nums = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|萬|天|周|個月|个月|次|单|單)", _txt))
+                _tbl = _txt.count("\n|")
+                _fill = len(re.findall(r"【填】|\{FILL\}", _txt))
+                if _nums < 3 or _tbl < 1 or _fill > 0:
+                    _thin_ch.append(f"{_title[:18]}（數字 {_nums}/3、表格行 {_tbl}、殘留 【填】 {_fill}）")
+    if not quiet:
+        print(f"  {OK if not _thin_ch else NG} 場景章深度：不達標 {len(_thin_ch)} 章")
+        for _c in _thin_ch[:6]:
+            print(f"       ✗ {_c}")
+    if _thin_ch:
+        hard_errors.append("場景章內容不達標（只有標題不算完整）：" + "；".join(_thin_ch[:5])
+                           + "　→ 每章須 ≥3 個帶單位數字、≥1 張表、無 【填】 殘留")
+
+    # 14d Big Idea（僅在出現「大賽／提案」字樣時判）
+    _bi = re.search(r"Big Idea[^\n]*[:：]\s*(.+)", body)
+    if _bi:
+        _s = re.sub(r"[\s【】]", "", _bi.group(1))[:80]
+        _len_ok = 6 <= len(_s) <= 22
+        _conc = any(w in _s for w in CONCRETE_ACTION_WORDS + CONCRETE_OBJECT_WORDS)
+        _gen = [w for w in GENERIC_CATEGORY_WORDS if w in _s]
+        _prob = []
+        if not _len_ok:
+            _prob.append(f"長度 {len(_s)} 字（需 6–22，超長即不可複述）")
+        if not _conc:
+            _prob.append("未綁定具體動作或具體物")
+        if _gen:
+            _prob.append("含品類通用詞：" + "、".join(_gen))
+        if not quiet:
+            print(f"  {OK if not _prob else NG} Big Idea：{_s[:30]}…"
+                  + (f"（{'；'.join(_prob)}）" if _prob else ""))
+        if _prob:
+            hard_errors.append("Big Idea 不達標：" + "；".join(_prob)
+                               + "　→ 判據是「一句能被別人複述、且綁定了具體動作或物」。")
+    elif not quiet:
+        print(f"  {INFO} 未見 Big Idea（非大賽／提案場景可忽略）")
+
+    # ── 【15】新增章节的实质校验（2026-09-17 随 R1 的 C 组一起加）
+    #    原则同【14】：**标题在场不算数**，要看它有没有被真填、且填得够硬。
+    if not quiet:
+        print("\n【15】新增章节实质校验（利益相关者／Red Team／洞察／取舍／回指／渠道）")
+
+    # 15a 利益相关者与阻力处理
+    _stake = [v for k, v in _secs.items() if "利益相关者" in k]
+    if _stake:
+        _txt = _stake[0]
+        _rows = [r for r in _txt.split("\n") if r.strip().startswith("|")][1:]
+        _against = len(re.findall(r"反对", _txt))
+        _ok = len(_rows) >= 3 and _against >= 1
+        if not quiet:
+            print(f"  {OK if _ok else NG} 利益相关者：{len(_rows)} 个角色行（需 ≥3）、"
+                  f"出现「反对」{_against} 次（需 ≥1）")
+        if not _ok:
+            hard_errors.append(
+                "利益相关者章不达标 —— 需 ≥3 个角色且**至少 1 个反对者**。"
+                "全是「支持」等于这份方案没做过落地推演。")
+    else:
+        warnings.append("未見「利益相关者与阻力处理」章 —— 桌面档／B端／G端 交付必须补（见 12-范式库）")
+
+    # 15b Red Team
+    _rt = [v for k, v in _secs.items() if "最可能怎么死" in k]
+    if _rt:
+        _txt = _rt[0]
+        _n_arg = len(re.findall(r"最强反方论点", _txt))
+        _n_cond = len(re.findall(r"成立的条件", _txt))
+        _n_date = len(re.findall(r"成立的条件[^\n]*\d", _txt))
+        _ok = _n_arg >= 3 and _n_cond >= 3 and _n_date >= 3
+        if not quiet:
+            print(f"  {OK if _ok else NG} Red Team：论点 {_n_arg}/3、条件 {_n_cond}/3、"
+                  f"含数字或日期的条件 {_n_date}/3")
+        if not _ok:
+            hard_errors.append("Red Team 不达标 —— 定长三条，且每条的「成立条件」必须含数字或日期。")
+    else:
+        warnings.append("未見「这个方案最可能怎么死」（Red Team）章 —— 建议补")
+
+    # 15c 洞察萃取
+    _ins = [v for k, v in _secs.items() if "洞察萃取" in k]
+    if _ins:
+        _txt = _ins[0]
+        _ok = ("共鸣测试" in _txt) and bool(re.search(r"(人|用户|用戶)", _txt))
+        if not quiet:
+            print(f"  {OK if _ok else NG} 洞察萃取：含共鸣测试 {'是' if '共鸣测试' in _txt else '否'}")
+        if not _ok:
+            hard_errors.append("洞察萃取不达标 —— 必须有共鸣测试（念给 3 个人，几人说「啊，我也是」）。")
+
+    # 15d 主动放弃
+    _con = [v for k, v in _secs.items() if "约束与风险底线" in k]
+    if _con:
+        _n_give = len(re.findall(r"放弃|不做|砍掉|砍哪", _con[0]))
+        _ok = _n_give >= 2
+        if not quiet:
+            print(f"  {OK if _ok else NG} 主动放弃：出现 {_n_give} 次（需 ≥2）")
+        if not _ok:
+            hard_errors.append("「主动放弃了什么」不足 2 条 —— 只写约束不写放弃，等于没做取舍（80/20 的反面）。")
+
+    # 15e 创意回指
+    if re.search(r"Big Idea", body):
+        _n_trace = len(re.findall(r"回指", body))
+        _ok = _n_trace >= 1 and bool(re.search(r"打法\s*\{?【?填?】?\}?\s*\d*", body))
+        if not quiet:
+            print(f"  {OK if _ok else NG} 创意回指：「回指」出现 {_n_trace} 次")
+        if not _ok:
+            hard_errors.append("创意没有回指策略 —— 每个样稿必须写「回指：本条创意解决【打法 N】的第【X】步」。")
+
+    # 15f 渠道不可移植元素
+    _ch = [v for k, v in _secs.items() if "不同形态" in k]
+    if _ch:
+        _txt = _ch[0]
+        _rows = [r for r in _txt.split("\n") if r.strip().startswith("|")][1:]
+        _ok = len(_rows) >= 1 and "不可移植" in _txt
+        if not quiet:
+            print(f"  {OK if _ok else NG} 渠道形态表：{len(_rows)} 行、含「不可移植元素」列 "
+                  f"{'是' if '不可移植' in _txt else '否'}")
+        if not _ok:
+            hard_errors.append("渠道只是「换名字」—— 5.1 表必须有「不可移植元素」列，且每渠道至少 1 个。")
+
+    # ── 結論
     print("\n" + "=" * 64)
     if hard_errors:
         print(f"{NG} 自檢不通過（{len(hard_errors)} 項硬錯誤）：")

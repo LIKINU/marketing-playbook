@@ -62,7 +62,8 @@ python scripts/start_here.py --client "客戶情況一句話"   # 人／主會�
 | | `delivery_check.py` | 交付形態：附件／封面／文件名／佔位符／匿名紅線 |
 | **④ 出稿** | `run_pipeline.py` | ⛔ **唯一出稿入口**，六關串成一條鏈 |
 | | `build_docx.py` · `reformat_to_template.py` | 生成 `.docx`／按客戶範本重排 |
-| **⑤ 品質保障** | `verify_all.py` | 全鏈路 ＋ **50 遍冪等壓測**（倉庫必須零漂移） |
+| **⑤ 品質保障** | `impact.py` | **影响面分析**：改完一处 → 自动算出「必须重跑什么 + 必须同步改什么」 |
+| | `verify_all.py` | 全鏈路 ＋ **50 遍冪等壓測**（倉庫必須零漂移） |
 | | `kb_audit.py` | 知識庫**連通性**審計（L1–L7，專抓「零件合格但傳動軸斷了」） |
 | | `promise_check.py` | **文檔承諾 ↔ 實際執行**對賬 |
 | | `optimize_scan.py` | 每輪產出 ≤10 條可優化項 |

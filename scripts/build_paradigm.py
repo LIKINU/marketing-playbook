@@ -16,6 +16,7 @@
     python scripts/build_paradigm.py --dry-run  # 只校验，不写文件
 """
 import argparse
+import io
 import json
 import os
 import re
@@ -151,6 +152,7 @@ def preserved_head():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--doc-map", default="", help="把交付稿章節結構寫進該檔的 DOCMAP 標記區塊")
     ap.add_argument("--dry-run", action="store_true", help="只做一致性校验，不写文件")
     a = ap.parse_args()
 
@@ -169,6 +171,9 @@ def main():
         print("   处理：以 composer.py 为准，改 scripts/paradigm_data.py 的 SKELETON_HEADS。")
         sys.exit(1)
     print("\n  ✅ 六档骨架与 paradigm_data 声明完全一致（无漂移）\n")
+
+    if a.doc_map:
+        write_doc_map(a.doc_map)
 
     if a.dry_run:
         print("（--dry-run：未写文件）")
@@ -213,6 +218,39 @@ def main():
         print(f"     ⚠️ 有 {total_missing} 节没写指引（见文中「暂无指引」标记）")
     else:
         print("     指引覆盖：全部章节均有指引 ✅")
+
+
+def write_doc_map(path):
+    """把「交付稿实际章节结构」写进 `path` 的 <!-- DOCMAP:BEGIN --> … <!-- DOCMAP:END --> 区块。
+
+    為什麼要自動生成：README 裡那張「八篇結構表」是**手寫的**，跑了五輪優化之後
+    早就跟 composer 的實際輸出不一樣了（新增了議題樹／洞察萃取／投流／追投止損／
+    風險六件套／合同要點／授權來源／冷啟動／達人分層／總部權責…）。
+    → 手寫的結構表必然過時；**改成由腳本生成，改骨架就自動更新**（並受 50 遍冪等壓測保護）。
+    """
+    if not path or not os.path.exists(path):
+        print(f"{WARN} 找不到 {path}，跳過 --doc-map")
+        return
+    doc = io.open(path, encoding="utf-8").read()
+    B, E = "<!-- DOCMAP:BEGIN -->", "<!-- DOCMAP:END -->"
+    if B not in doc or E not in doc:
+        print(f"{WARN} {path} 裡沒有 {B} / {E} 標記，跳過 --doc-map")
+        return
+    lines = ["交付稿的實際章節結構（**本區塊由 `scripts/build_paradigm.py --doc-map` 生成，"
+             "改骨架後重跑即可，不要手改**）：", "",
+             "| 章节 | 说明 |", "|---|---|"]
+    seen = set()
+    for h in P.COMMON_HEADS:
+        n = re.sub(r"\s", "", h)
+        if n in seen:
+            continue
+        seen.add(n)
+        g = P.GUIDE.get(h, {})
+        lines.append(f"| {h} | {(g.get('what') or '')[:60]} |")
+    body = "\n".join(lines)
+    doc = doc[:doc.index(B) + len(B)] + "\n" + body + "\n" + doc[doc.index(E):]
+    io.open(path, "w", encoding="utf-8").write(doc)
+    print(f"{OK} 已更新 {path} 的交付稿結構表（{len(seen)} 節）")
 
 
 if __name__ == "__main__":

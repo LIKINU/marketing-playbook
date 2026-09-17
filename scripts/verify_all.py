@@ -51,6 +51,9 @@ FIXERS = [
     ("case_order.py", ["--fix"]),
     ("case_play_index.py", ["--fix"]),
     ("file_meta.py", ["--fix", "--quiet"]),
+    # 交付稿結構表由 paradigm_data 生成並寫回 README —— 掛在冪等壓測裡，
+    # 改骨架忘了更新 README 會被第 2 輪的哈希漂移直接抓出來。
+    ("build_paradigm.py", ["--doc-map", "README.md"]),
 ]
 # 只讀型（每次輸出必須一致）
 READERS = [

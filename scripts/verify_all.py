@@ -237,6 +237,34 @@ def stage_e(quiet):
     return (0 if rc == 0 else 1), 1
 
 
+def stage_f(quiet):
+    """F 對賬與優化點：文檔承諾 ↔ 實際執行 ／ 每輪可優化項。
+
+    為什麼要並進同一個入口：這五條自檢原本散在四處（`smoke_test`／`kb_audit`／
+    `promise_check`／`optimize_scan`／`verify_all`），**跑的人很容易只跑熟悉的那兩條**。
+    → 收成一個入口，跑一次就知道全部。
+
+    ⚠️ `promise_check` 判失敗（承諾沒被執行＝真問題）；
+       `optimize_scan` **只報數不算失敗**（它是建議，不是門檻）。
+    """
+    bad = 0
+    rc1, out1 = sh([PY, os.path.join(HERE, "promise_check.py")])
+    tail1 = ""
+    for l in out1.strip().split("\n")[::-1]:
+        if l.strip() and not l.startswith("="):
+            tail1 = l.strip()[:70]
+            break
+    if rc1 != 0:
+        bad += 1
+    rc2, out2 = sh([PY, os.path.join(HERE, "optimize_scan.py"), "-n", "10"])
+    m = re.search(r"命中 (\d+) 条", out2)
+    n2 = int(m.group(1)) if m else -1
+    if not quiet:
+        print(f"  F 對賬（文檔承諾↔實際執行）：{'✅' if rc1 == 0 else '✗'} {tail1}")
+        print(f"  F 優化點（建議，不算失敗）：{'✅ 0 條' if n2 == 0 else f'⚠️  {n2} 條'}")
+    return bad, 2
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", "--rounds", type=int, default=50)
@@ -257,6 +285,7 @@ def main():
     r.append((f"C 只讀 ×{a.rounds}", *stage_c(a.rounds, q)))
     r.append(("D 端到端出稿", *stage_d(q)))
     r.append(("E 連通性 7 鏈路", *stage_e(q)))
+    r.append(("F 對賬與優化點", *stage_f(q)))
 
     h1 = repo_hash()
     if h_mid[0] is not None:

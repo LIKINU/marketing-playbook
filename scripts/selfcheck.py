@@ -127,6 +127,12 @@ def read(path):
         return f.read()
 
 
+def _is_full_hint(text):
+    """早期判斷「這是不是完整版方案」——供【1b】用（那時 _is_full_plan 還沒算出來）。
+    判據同【15】：同時有 现状分析／策略／定位与口径／预算明细 四章。"""
+    return all(x in text for x in ["现状分析", "策略", "定位与口径", "预算明细"])
+
+
 def emit_json(hard, warns, code):
     """--json：給 CI／自動化消費的結構化輸出（優化項 2026-09-16）。"""
     if "--json" in sys.argv:
@@ -207,6 +213,42 @@ def main():
     if fill_cnt >= 1:
         hard_errors.append(f"方案殘留 {fill_cnt} 處 composer 占位符【填】 —— 骨架未填完，不得交付"
                            f"（占位符為 0 容忍：官方「不得留空」不給額度）")
+
+    # 1b) **與 paradigm_data 對賬**（2026-09-17 反向榨第 1 條的治本措施）
+    #   問題：上面的 `SECTIONS` 是**手寫的 9 個關鍵詞**，而 composer／paradigm_data 的骨架
+    #   至少有 30+ 節。於是 SKILL 合約裡承諾的「2.3 被低估的資產」「2.4 節奏排期」
+    #   「7.3 追投與止損規則」—— composer 一個都不生成，**卻沒有任何一關會發現**
+    #   （貝恩 R1 agent ＋ 運營 R3 agent 兩個獨立視角都指出了這件事）。
+    #   → 改為直接讀 `paradigm_data.COMMON_HEADS` 逐節對賬。
+    #     這條鏈就閉環了：composer 產出 → build_paradigm 校驗宣告 → selfcheck 校驗交付稿。
+    try:
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "paradigm_data", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "paradigm_data.py"))
+        _pd = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_pd)
+        _norm = lambda s: re.sub(r"[\s]", "", s)          # 去空白后比对
+        _body_n = _norm(body)
+        _skeleton_missing = [h for h in getattr(_pd, "COMMON_HEADS", [])
+                             if _norm(h) not in _body_n]
+        if not quiet:
+            print("\n【1b】與 paradigm_data 骨架對賬（治本：文檔承諾 ≠ 實際生成）")
+            print(f"  {'✅' if not _skeleton_missing else '❌'} 通用骨架 "
+                  f"{len(getattr(_pd, 'COMMON_HEADS', []))} 節，缺 {len(_skeleton_missing)} 節"
+                  + (f"：{'、'.join(_skeleton_missing[:6])}" if _skeleton_missing else ""))
+        if _skeleton_missing:
+            _hard_if_full_early = (
+                "交付稿缺少 paradigm_data 聲明的章節："
+                + "、".join(_skeleton_missing[:8])
+                + "　→ 這是「文檔承諾了、實際沒生成」的漂移（composer 有 build_paradigm 把關，"
+                  "selfcheck 這一關負責把關交付稿）。")
+            if _is_full_hint(text):
+                hard_errors.append(_hard_if_full_early)
+            else:
+                warnings.append(_hard_if_full_early + "（速覽類快案可忽略）")
+    except Exception as _e:
+        warnings.append(f"與 paradigm_data 對賬失敗（{type(_e).__name__}）—— 【1b】未生效")
 
     # 2) 交付自檢單（協議 3：可寫進文檔附件，也可只在聊天回覆輸出 → 缺失僅警告，不攔）
     has_checklist = ("自檢單" in text or "自检单" in text)
@@ -641,14 +683,20 @@ def main():
         "G端": ["政策依据与上位规划", "绩效目标与考核", "资金与保障", "汇报与评审", "合规与舆情红线"],
         "投標": ["商务响应偏离表", "需求理解", "实施与保障", "业绩与售后", "报价与资质"],
     }
-    m9 = re.search(r"(?m)^##\s*九\s*[·・.\s]*(.+?)(?=^##\s|\Z)", body, flags=re.S)
+    # ⚠️ 2026-09-17 改（運營 R3 指出）：原先只認「## 九 ·」這一節的標題 ——
+    #    而各檔的場景章編號並不固定（標準/B端到十三、G端到十四），
+    #    一旦場景章不在「九」就整關跳過，導致**多項檢查靜默空轉**。
+    #    改成掃描全部 `## ` 標題去找場景關鍵詞。
     _detected = None
-    if m9:
-        head9 = m9.group(1)
+    m9 = None
+    for _h in re.findall(r"(?m)^##\s+(.+?)\s*$", body):
         for sc, kw in _scene_detect:
-            if kw in head9:
+            if kw in _h:
                 _detected = sc
+                m9 = re.search(r"(?m)^##\s*" + re.escape(_h) + r"\s*$", body)
                 break
+        if _detected:
+            break
     if _detected:
         req = _scene_req[_detected]
         missing = [c for c in req if c not in body]

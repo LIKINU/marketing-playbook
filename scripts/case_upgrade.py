@@ -96,4 +96,6 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"❌ {type(e).__name__}: {e}")
+        print("→ 先确认案例檔編碼為 UTF-8、且 sections 標題格式未被改動；"
+              "若屬環境問題，跳過本腳本不影響交付（它只做質量統計）。")
         sys.exit(2)

@@ -42,7 +42,7 @@ import os
 import re
 import sys
 
-OK, NG, WARN, HINT = "✅", "❌", "⚠️", "→"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 # 硬要素清單（協議 2 要求「一件不丟」的關鍵項）
 KEY_ELEMENTS = {

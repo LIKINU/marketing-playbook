@@ -90,7 +90,7 @@ import collections
 import re
 import sys
 
-OK, NG, WARN, INFO = "✅", "❌", "⚠️", "ℹ️"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 # ==========================================================================
 # 閾值表 —— 全部來自 范式档 §五「可被脚本校驗的深度指標」

@@ -30,7 +30,7 @@ roles.json 格式（主理人在分工後填；每角色只填「產出摘要」
 import json
 import sys
 
-OK, NG = "✅", "❌"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 ROLES = ["策略", "品牌", "觸達", "文案", "財務風控"]
 
 

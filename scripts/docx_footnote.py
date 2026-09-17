@@ -225,7 +225,8 @@ def inspect(docx_path):
             rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
             out["has_rel"] = "footnotes.xml" in rels
         except KeyError:
-            pass
+            # 缺 rels ＝ 装配必不完整，不能在 verify 里静默成 False 就完事
+            out["rels_missing"] = True
         if out["has_part"]:
             fx = z.read("word/footnotes.xml").decode("utf-8")
             out["texts"] = re.findall(r"<w:footnote w:id=\"(\d+)\">(.*?)</w:footnote>",
@@ -262,4 +263,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"{WARN} 已中断。")
+        sys.exit(130)
+    except Exception as e:
+        # 协议 8：脚本挂了要能降级继续，不能让执行 AI 卡在裸 traceback 上。
+        print(f"{NG} 執行出錯：{type(e).__name__}: {e}")
+        print(f"{HINT} 依協議 8：修正後重跑；環境問題就改用 Markdown 協議手工完成，不要卡在這裡。")
+        sys.exit(2)

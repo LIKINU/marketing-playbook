@@ -105,12 +105,11 @@ def main():
     if not (a.apply or a.dry_run):
         a.dry_run = True
     def _num(fp):
-    m = re.match(r"(\d+)", os.path.basename(fp))
-    return int(m.group(1)) if m else 999  # 非編號檔（README.md 等）一律排除
+        m = re.match(r"(\d+)", os.path.basename(fp))
+        return int(m.group(1)) if m else 999  # 非編號檔（README.md 等）一律排除
 
-
-files = [f for f in sorted(glob.glob(os.path.join(ROOT, "references", "cases", "*.md")))
-         if _num(f) <= 50]
+    files = [f for f in sorted(glob.glob(os.path.join(ROOT, "references", "cases", "*.md")))
+             if _num(f) <= 50]
     tot = 0
     for f in files:
         n = process(f, a.apply)

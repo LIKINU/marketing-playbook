@@ -50,7 +50,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OK, NG, WARN, HINT = "✅", "❌", "⚠️", "→"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 STEPS = [
     # (顯示名, 腳本, 是否阻斷)

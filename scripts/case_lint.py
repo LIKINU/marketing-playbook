@@ -38,7 +38,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 
-OK, NG, WARN = "✅", "❌", "⚠️"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 # 公司背景詞（與 SKILL「案例集硬規則」對應）。機構／書籍／出版物類（46–51）豁免。
 BG_WORDS = ["創始人", "创始人", "成立於", "成立于", "股權", "股权", "融資", "融资",

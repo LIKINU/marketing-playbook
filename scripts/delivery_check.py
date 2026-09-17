@@ -30,7 +30,7 @@ import os
 import re
 import sys
 
-OK, NG, WARN = "✅", "❌", "⚠️"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 # ── 内置的「通用必交附件」模板（没有 rules.json 时用它兜底）──
 DEFAULT_MANIFEST = {

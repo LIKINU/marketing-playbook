@@ -215,4 +215,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"{WARN} 已中断。")
+        sys.exit(130)
+    except Exception as e:
+        # 协议 8：脚本挂了要能降级继续，不能让执行 AI 卡在裸 traceback 上。
+        print(f"{NG} 執行出錯：{type(e).__name__}: {e}")
+        print(f"{HINT} 依協議 8：修正後重跑；環境問題就改用 Markdown 協議手工完成，不要卡在這裡。")
+        sys.exit(2)

@@ -262,7 +262,9 @@ def main():
     print(f"✅ 寫入 {os.path.relpath(DST, ROOT)}，刪除 {os.path.relpath(SRC, ROOT)}")
 
     hits = 0
-    for f in glob.glob(os.path.join(ROOT, "**", "*.md"), recursive=True):
+    # sorted()：glob 不保证顺序，遍历顺序不同→同一输入产出不同文件→
+    # verify_all 的 50 遍哈希压测会随机报漂移，且极难复现。
+    for f in sorted(glob.glob(os.path.join(ROOT, "**", "*.md"), recursive=True)):
         if "/.git/" in f or "/.workbuddy/" in f:
             continue
         s0 = open(f, encoding="utf-8").read()

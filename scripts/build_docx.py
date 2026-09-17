@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import docx_footnote as DOCX_FN   # noqa: E402  Word 腳註裝配器（python-docx 原生不支援）
 
 CN_FONT = "微軟雅黑"
-OK, NG, WARN = "✅", "❌", "⚠️"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 
 # ---------- 字體與頁碼工具 ----------
@@ -461,8 +461,10 @@ def main():
                 with _zf.ZipFile(out) as _z:
                     _left = len(re.findall(r"\[\^[^\]]+\]",
                                           _z.read("word/document.xml").decode("utf-8")))
-            except Exception:
-                pass
+            except Exception as _e:
+                # ⛔ 不许静默：这段的唯一职责就是「查正文有没有残留标记」，
+                #    它自己失败还不出声，等于这层安全网从没装上。
+                print(f"{WARN} 残留标记扫描失败（{type(_e).__name__}）—— 请手工确认正文无 [^n] 字面残留")
             print(f"{WARN} 腳註定位：{_n}/{_fn_refs} 處引用成功"
                   + (f"，正文殘留 {_left} 處字面 `[^n]` 標記" if _left else "")
                   + " —— 有渲染路徑漏了腳註處理，請檢查")

@@ -326,7 +326,10 @@ def l7(quiet):
             continue
         try:
             t = read(f)
-        except Exception:
+        except Exception as _e:
+            # 读不到就得记账：私有痕迹扫描里「没扫到」和「扫不了」是两回事，
+            # 后者是盲区，静默 continue 会让人以为扫过了。
+            print(f"  ⚠️ 私有痕迹扫描跳过（读不了）：{os.path.relpath(f, ROOT)}（{type(_e).__name__}）")
             continue
         for i, l in enumerate(t.split("\n"), 1):
             if PRIVATE_PAT.search(l):

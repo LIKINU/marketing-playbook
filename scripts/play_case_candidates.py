@@ -117,5 +117,19 @@ def main():
             print(f"     {ov:.3f}  {c['brand'][:20]:<22} {c['title'][:44]:<46} {c['file']}")
 
 
+def _entry():
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as e:
+        print(f"❌ 執行出錯：{type(e).__name__}: {e}")
+        sys.exit(2)
+
+
 if __name__ == "__main__":
-    main()
+    # exit-code: n/a
+    #   本脚本是**纯报告工具**（只 print 候选排序，不写任何文件、无失败模式），
+    #   恒返回 0 是正确语义。用 `exit-code: n/a` 标记出来，让 optimize_scan 的
+    #   「有 CLI 入口却没有退出码语义」这一条不再误报它 —— 而不是让扫描器闭嘴。
+    _entry()

@@ -32,6 +32,7 @@
 import argparse
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,9 @@ def sh(args, timeout=600):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+_SKIPPED: list = []
+
+
 def repo_hash():
     """倉庫內容哈希（排除 .git/.workbuddy/__pycache__）—— 用來偵測「跑一輪有沒有改動東西」"""
     h = hashlib.sha256()
@@ -77,8 +81,13 @@ def repo_hash():
             h.update(os.path.relpath(p, ROOT).encode())
             try:
                 h.update(open(p, "rb").read())
-            except Exception:
-                pass
+            except Exception as _e:
+                # ⛔ 最危险的一处静默：读不到就跳过 ＝ 这个文件不参与哈希 ＝
+                #    它怎么变都测不出漂移，而报告照样印「仓库哈希未变」。
+                _SKIPPED.append(f"{p}（{type(_e).__name__}）")
+    if _SKIPPED:
+        print(f"  {WARN} 哈希跳过 {len(_SKIPPED)} 个文件（读不了）—— "
+              f"零漂移结论对这些文件不成立：{_SKIPPED[:3]}")
     return h.hexdigest()
 
 
@@ -94,12 +103,19 @@ def stage_a(quiet):
                 if '__name__ == "__main__"' not in fh.read():
                     continue
         except OSError:
-            pass
+            pass   # 读不了就当它有入口（fail-open）：宁可多测一个，不可漏测
         scripts.append(f)
     for s in scripts:
         rc, out = sh([PY, os.path.join(HERE, s), "--help"], timeout=60)
         # argparse 正常回 0；有些腳本沒有 --help 會回 2 —— 只要不是 traceback 就算介面可用
-        if "Traceback" in out:
+        # ⚠️ 2026-09-17 实测漏检：原先只认 "Traceback"，而 **SyntaxError /
+        #    IndentationError 这类解析期错误根本不打印 traceback** ——
+        #    case_relabel.py 因此带病通过了不知多少轮 A 关（它其实一行都跑不起来）。
+        #    → 改为匹配「所有常见错误类名」，不再依赖 traceback 这个外观特征。
+        _ERR = re.compile(r"Traceback|\b(SyntaxError|IndentationError|TabError|"
+                          r"NameError|AttributeError|TypeError|ValueError|KeyError|"
+                          r"IndexError|ModuleNotFoundError|ImportError|OSError)\b")
+        if _ERR.search(out):
             bad.append((s, out.strip().split("\n")[-1][:90]))
     if not quiet:
         print(f"  A 介面：{len(scripts)} 支腳本 --help，異常 {len(bad)}")

@@ -23,7 +23,7 @@ import os
 import re
 import sys
 
-OK, NG, WARN = "✅", "❌", "⚠️"
+from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不要在各自文件里重定义
 
 # 繁→简单字表（与 composer 共用 `scripts/t2s_data.py`，机械生成、零依赖）
 def _load_t2s():
@@ -444,8 +444,11 @@ def main():
                 nm = _s2cn(m.group(2).strip())
                 if len(nm) >= 2:
                     _names[m.group(1).upper()] = nm
-        except Exception:
-            pass
+        except Exception as _e:
+            # ⛔ 不能吞：这张表是 8b「策略篇须用 ≥3 个理论」的唯一依据。
+            #    载入失败＝后面那条校验会拿空表去比，必然判「没用到理论」或直接跳过。
+            warnings.append(f"模型名表载入失败（{type(_e).__name__}）—— 【8】的 8b 校验不可信，请检查 03 手册")
+            print(f"  {WARN} 模型名表载入失败（{type(_e).__name__}）—— 8b 校验不可信")
     _ms = re.search(r"^#{1,4}\s*[^\n]*策略(.*?)(?=^#{1,2}\s*[^\n]*定位|\Z)", text, flags=re.S | re.M)
     _strat = _ms.group(1) if _ms else text
     _hit_names = sorted({nm for nm in _names.values() if nm in _strat})

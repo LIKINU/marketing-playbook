@@ -31,7 +31,7 @@ python scripts/start_here.py --client "客戶情況一句話"   # 人／主會�
 
 ## 零之一、倉庫地圖（**人都要找東西時看這張**）
 
-> 這套 skill 已經長到：**3 份總綱 ＋ 14 份編號參考 ＋ 52 份行業案例 ＋ 40 支腳本 ＋ 18 關機械自檢**。
+> 這套 skill 已經長到：**3 份總綱 ＋ 14 份編號參考 ＋ 51 份行業案例 ＋ 44 支 Python 腳本（＋1 支同步腳本）＋ 18 關機械自檢**。
 > 不知道從哪讀起時，先看下面三張表。
 
 ### 0.1 頂層有什麼
@@ -41,15 +41,17 @@ python scripts/start_here.py --client "客戶情況一句話"   # 人／主會�
 | `SKILL.md` | **唯一入口**。§0 門禁 13 項 → §八篇 → §二路由表 → §六自檢清單 | 執行 AI（第一份就讀它） |
 | `AGENTS.md` | **跨工具接入說明**：怎麼放到別的 AI 工具、能力不足時怎麼降級 | 換平台時讀 |
 | `README.md` | 就是這份：給人看的使用說明 ＋ 倉庫地圖 | **你（使用者）** |
-| `references/` | 知識庫：14 份編號文檔 ＋ `cases/`（52 行業案例）＋ `范例/`（成品樣張） | 執行 AI 按需載入 |
-| `scripts/` | **強制層**：40 支腳本。知識由腳本機械注入，校驗不過就拿不到 `.docx` | 想繞也繞不過 |
-| `` | **過程記錄**（不是交付物）：R1–R5 五輪優化的 20 條清單、自我提示、存量清理清單 | 維護者／想知道「為什麼這樣設計」時 |
-| `实测-*/` | 本地測試產物（`.gitignore` 已排除，不進倉庫） | 無 |
+| `references/` | 知識庫：14 份編號文檔 ＋ `cases/`（51 行業案例）＋ `范例/`（成品樣張） | 執行 AI 按需載入 |
+| `scripts/` | **強制層**：44 支 Python 腳本（＋1 支 笔记库 同步 `.sh`）。知識由腳本機械注入，校驗不過就拿不到 `.docx` | 想繞也繞不過 |
+| `` | **過程記錄**（不是交付物）：R1–R6 六輪優化的 20 條清單、自我提示、存量清理清單 | 維護者／想知道「為什麼這樣設計」時 |
+| `实测-*/` | 本地測試產物（`.gitignore` 已排除，不進倉庫）。殘留了就跑 `python scripts/repo_hygiene.py --clean` 清掉 | 無 |
 
-### 0.2 40 支腳本怎麼分工（按「什麼時候跑」）
+### 0.2 44 支腳本怎麼分工（按「什麼時候跑」）
 
 | 階段 | 腳本 | 一句話 |
 |---|---|---|
+| **⓪ 開場** | `start_here.py` | **開新會話第一條命令**：告訴你「要讀哪幾份、讀哪一節、不要讀什麼」 |
+| | `` | 生成 ``（給 subagent 的單檔快照，取代重讀整倉） |
 | **① 接案** | `flow.py` | 流程嚮導：告訴你「現在第幾步、下一步跑哪條命令」 |
 | | `gate_check.py` | 門禁 13 項核對 → 產出《任務規則表》 |
 | **② 組裝** | `composer.py` | **核心引擎**：把打法／模型／案例／學者機械注入骨架 |
@@ -64,12 +66,15 @@ python scripts/start_here.py --client "客戶情況一句話"   # 人／主會�
 | | `build_docx.py` · `reformat_to_template.py` | 生成 `.docx`／按客戶範本重排 |
 | **⑤ 品質保障** | `impact.py` | **影响面分析**：改完一处 → 自动算出「必须重跑什么 + 必须同步改什么」 |
 | | `verify_all.py` | 全鏈路 ＋ **50 遍冪等壓測**（倉庫必須零漂移） |
+| | `smoke_test.py` | 改完腳本先跑的**快速冒煙測試**（12 項，秒級） |
 | | `kb_audit.py` | 知識庫**連通性**審計（L1–L7，專抓「零件合格但傳動軸斷了」） |
 | | `promise_check.py` | **文檔承諾 ↔ 實際執行**對賬 |
 | | `optimize_scan.py` | 每輪產出 ≤10 條可優化項 |
 | | `t2s_data.py` | 繁→簡對照表生成 |
-| **⑥ 案例庫維護** | `case_sections.py` · `case_order.py` · `case_lint.py` · `case_upgrade.py` · `case_scan.py` · `case_clean.py` · `case_relabel.py` · `case_digest.py` · `case_gap_fill.py` · `case_play_index.py` · `fix_play_cases.py` · `play_case_candidates.py` | 卡片格式／順序／質量／索引 |
-| **⑦ 倉庫維護** | `file_meta.py` · `rename_tidy.py` · `top_titles.py` · `relocate_06.py` · `backlog_cleanup.py` | 檔頭自解釋／改名／存量清理 |
+| **⑥ 案例庫維護** | `case_sections.py` · `case_order.py` · `case_lint.py` · `case_upgrade.py` · `case_scan.py` · `case_clean.py` · `case_relabel.py` · `case_digest.py` · `case_gap_fill.py` · `case_play_index.py` · `fix_play_cases.py` · `play_case_candidates.py` · `case_upkit.py` | 卡片格式／順序／質量／索引 |
+| **⑦ 倉庫維護** | `repo_hygiene.py` | **冗余／衛生掃描**：孤兒檔／派生物／本機垃圾（`--clean` 清廢紙簍） |
+| | `file_meta.py` · `rename_tidy.py` · `top_titles.py` · `relocate_06.py` · `backlog_cleanup.py` | 檔頭自解釋／改名／存量清理 |
+| | `` | 把本 skill 鏡像到 笔记库 離線存檔（pre-push hook 自動觸發） |
 | **⑧ 共用** | `_common.py` | 跨腳本共用常量（`OK/NG/WARN` 等**只此一處**） |
 
 ### 0.3 18 關自檢分別在擋什麼
@@ -294,7 +299,7 @@ python scripts/start_here.py --client "客戶情況一句話"   # 人／主會�
 | **出骨架（知識自動注入）** | `python scripts/composer.py --rules rules.json --out skeleton.md --tier 速览\|标准\|G端 --internal skeleton.internal.md`（`--internal` 那份是施工说明，**不进交付稿**） |
 | **一步步怎麼操作** | `references/08-操作流程SOP.md` — 接案到出稿每一步的 輸入／命令／產出／校驗 |
 | **不知道「寫到什麼程度算夠」** | `references/07-质量范式-便利店开学季案.md` — ⭐ 質量標尺（角色產出規格／骨架模板／可校驗指標／好方案的硬門檻） |
-| **想看成品長什麼樣** | `references/范例/` — 交付稿樣張 `.md`＋`.docx`，另附**輸入文件樣張**（任務規則表／預算表 `.json`） |
+| **想看成品長什麼樣** | `references/范例/` — 交付稿樣張 `.md`，另附**輸入文件樣張**（任務規則表／預算表 `.json`）。要 Word 版就自己生成：`python scripts/build_docx.py references/范例/便利店开学季战役-交付稿.md` |
 | **想知道「這一節該寫什麼」** | ⭐ `references/12-范式库.md` — **六檔各自一套範式**：速覽（小客戶）／標準（C 端品牌）／大賽／B 端／G 端／投標。每檔 ＝ 骨架 ＋ **逐節填寫指引（該寫什麼／寫幾句／必須含哪幾個數）** ＋ **可直接改寫套用的關鍵句片段** |
 
 **51 個大類案例庫（649 張深度案例卡）**：01–45 行業（餐飲茶飲／食品飲料酒／美妝個護／服飾運動戶外／3C 數碼家電／汽車出行／互聯網平台／遊戲泛娛樂／AI 產品／B2B 與農產區域品牌／醫藥健康器械／母嬰寵物／家居建材家裝／零售商超便利店／教育文旅本地生活／金融保險／奢侈品高端／酒店度假／城市區域品牌／跨境出海／企業服務 SaaS／新能源／銀发經濟／二手循環／潮玩文創 IP／影視綜藝／茶飲烘焙／寵物服務／農業生鮮／體育賽事／眼鏡視光／珠寶鐘表／箱包皮具／香氛氣味／美容儀個護／健身健康／醫美／口腔連鎖／餐飲供應鏈／預製菜／文具文創／攝影影像／婚慶儀式／招聘雇主品牌／物流快遞）＋ **46–51 機構與方法論**（國際 4A／戰略諮詢／本土創意／營銷書籍作者／機構出版物／本土數字營銷與 MCN）。

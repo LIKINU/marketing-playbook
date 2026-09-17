@@ -94,7 +94,7 @@ RULES = [
     },
     {
         "match": ["references/cases/*.md", "references/cases/"],
-        "what": "52 份行業案例卡",
+        "what": "51 份行業案例卡",
         "must_run": [["case_sections.py", "--fix"], ["case_order.py"],
                      ["case_lint.py"], ["case_upgrade.py"],
                      ["case_play_index.py", "--fix"], ["kb_audit.py"]],
@@ -157,6 +157,34 @@ RULES = [
                       "改檔名/編號要跑 rename_tidy.py（舊檔名不得殘留）"],
         "why": "L1 檔案引用可解析 ＋ L7 私有痕跡都靠這條鏈",
     },
+    {
+        "match": ["scripts/repo_hygiene.py"],
+        "what": "倉庫冗余／衛生掃描",
+        "must_run": [["smoke_test.py"], ["optimize_scan.py"]],
+        "must_sync": [
+            "`JUNK_NAMES`／`JUNK_DIR_PAT`／`DERIVED_EXT` 是判據的唯一真相；"
+            "`find_orphans`／`find_derived`／`find_junk` 三者**必須共用 `_junk_why()`** "
+            "—— 兩處各寫一份判據早晚漂移，然後同一件事會報兩次",
+            "加進 verify_all 的 F 關時**不得帶 `--clean`**：回歸驗證不該有副作用",
+        ],
+        "why": "它是唯一查「檔案該不該存在」的尺子；判據散了就等於沒有尺子",
+    },
+    {
+        "match": ["references/范例/"],
+        "what": "交付稿樣張／輸入文件樣張",
+        "must_run": [["smoke_test.py"], ["verify_all.py"]],
+        "must_sync": [
+            "⚠️ `便利店开学季战役-交付稿.md` 是 **3 支腳本的測試夾具**"
+            "（`smoke_test`／`verify_all`／`depth_check` 都直接讀它）—— 改它等於改測試",
+            "`-任务规则表.json` 是 `build_docx --rules` 的輸入、`-预算表.json` 是 "
+            "`budget_check` 的輸入、`-分工记录.json` 是 `role_check` 的輸入；"
+            "`（示例）区域茶饮新品牌-任务规则表.json` 是 `kb_audit` L4 的夾具",
+            "**樣張一律簡體**（交付物語言）—— 內部文檔才用繁體",
+            "已刪除的舊樣張（骨架示例／交付稿 .docx）**不得再被引用**；"
+            "要看 Word 版改為當場生成：`build_docx.py <該 .md>`",
+        ],
+        "why": "樣張同時是「教材」與「測試夾具」—— 兩重身分，改動影響面比看起來大",
+    },
 ]
 
 # 這些檔「改了必須跑全量」—— 因為它們是別人的依賴，影響面無法枚舉
@@ -184,10 +212,46 @@ def git_changed():
 
 
 def hit(rule, path):
+    """這條規則命不命中這個路徑。回傳**命中的那個 pattern**（沒命中回 None）——
+    回傳 pattern 而不是 True，是為了讓呼叫端能比「誰更長＝更具體」。"""
     for pat in rule["match"]:
         if fnmatch.fnmatch(path, pat) or path.startswith(pat.rstrip("*")) or path == pat:
-            return True
-    return False
+            return pat
+    return None
+
+
+def specificity(pat):
+    """越具體＝越該贏。回傳可比較的元組。
+
+    判據是**通配符之前的字面前綴長度**（完全沒有通配符＝全長），平手再比
+    「去掉通配符後的淨長度」。
+
+    為什麼不用「整條 pattern 的字元數」：`references/*.md`（15 字）比
+    `references/范例/`（14 字）長，但前者只鎖定 11 個字面前綴、後面全放行；
+    後者 14 個字**全部是字面**。純比長度會讓「放行範圍更大」的那條贏 —— 判反了。
+    """
+    prefix = re.split(r"[*?\[]", pat, 1)[0]
+    literal = pat.replace("*", "").replace("?", "")
+    return (len(prefix), len(literal))
+
+
+def best_rule(path):
+    """**最長鍵優先**：命中多條時取最具體的那條（見 `specificity()`）。
+
+    為什麼不是「第一條命中就停」：`fnmatch` 的 `*` 會跨 `/`，所以
+    `scripts/*.py` 會把 `scripts/repo_hygiene.py` 遮掉、
+    `references/*.md` 會把 `references/范例/` 遮掉。**判據是「誰更具體」，不是「誰先寫」。**
+    （與 AGENTS.md §四之一 記的「短鍵遮蔽長鍵」同類 —— 那次是 `play_overrides` 的 `'VI'`。）
+    """
+    best, best_key = None, (-1, -1)
+    for r in RULES:
+        pat = hit(r, path)
+        if pat is None:
+            continue
+        key = specificity(pat)
+        if key > best_key:
+            best, best_key = r, key
+    return best
 
 
 def main():
@@ -222,19 +286,20 @@ def main():
 
     matched, runs, syncs, heavy = [], [], [], False
     for f in files:
-        for r in RULES:
-            if hit(r, f):
-                if r["what"] not in [x["what"] for x in matched]:
-                    matched.append(r)
-                for cmd in r["must_run"]:
-                    if cmd not in runs:
-                        runs.append(cmd)
-                for s in r["must_sync"]:
-                    if s not in syncs:
-                        syncs.append(s)
-                if r.get("heavy"):
-                    heavy = True
-                break
+        # **最長鍵優先**（見 best_rule 的說明）。2026-09-18 前是「命中第一條就 break」，
+        # 通用規則因此會遮蔽專門規則 —— 改 repo_hygiene 時算不出它真正該跑的 smoke_test。
+        r = best_rule(f)
+        if r:
+            if r["what"] not in [x["what"] for x in matched]:
+                matched.append(r)
+            for cmd in r["must_run"]:
+                if cmd not in runs:
+                    runs.append(cmd)
+            for s in r["must_sync"]:
+                if s not in syncs:
+                    syncs.append(s)
+            if r.get("heavy"):
+                heavy = True
 
     print(f"\n【你改了什麼】")
     for f in files[:20]:

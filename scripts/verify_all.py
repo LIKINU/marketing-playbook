@@ -31,6 +31,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -238,14 +239,17 @@ def stage_e(quiet):
 
 
 def stage_f(quiet):
-    """F 對賬與優化點：文檔承諾 ↔ 實際執行 ／ 每輪可優化項。
+    """F 對賬與優化點：文檔承諾 ↔ 實際執行 ／ 每輪可優化項 ／ 倉庫冗余。
 
-    為什麼要並進同一個入口：這五條自檢原本散在四處（`smoke_test`／`kb_audit`／
-    `promise_check`／`optimize_scan`／`verify_all`），**跑的人很容易只跑熟悉的那兩條**。
+    為什麼要並進同一個入口：這幾條自檢原本散在四處（`smoke_test`／`kb_audit`／
+    `promise_check`／`optimize_scan`／`repo_hygiene`／`verify_all`），**跑的人很容易只跑熟悉的那兩條**。
     → 收成一個入口，跑一次就知道全部。
 
     ⚠️ `promise_check` 判失敗（承諾沒被執行＝真問題）；
-       `optimize_scan` **只報數不算失敗**（它是建議，不是門檻）。
+       `optimize_scan`／`repo_hygiene` **只報數不算失敗**（它們是建議，不是門檻）。
+
+    ⚠️ `repo_hygiene` 在這裡**刻意不加 `--clean`**：回歸驗證不該有副作用。
+       要清理請另外手動跑 `python scripts/repo_hygiene.py --clean`。
     """
     bad = 0
     rc1, out1 = sh([PY, os.path.join(HERE, "promise_check.py")])
@@ -259,9 +263,23 @@ def stage_f(quiet):
     rc2, out2 = sh([PY, os.path.join(HERE, "optimize_scan.py"), "-n", "10"])
     m = re.search(r"命中 (\d+) 条", out2)
     n2 = int(m.group(1)) if m else -1
+    # 倉庫冗余：孤兒 ＋ 派生物 ＋ 本機垃圾。只報數（建議性質），但會在報告裡明示，
+    # 免得「永遠沒有檔案被刪」這件事靜悄悄地累積。
+    # 用 --json 解析，不用正則刮表格 —— 刮表格的判據會隨排版漂移。
+    rc3, out3 = sh([PY, os.path.join(HERE, "repo_hygiene.py"), "--json"])
+    try:
+        j3 = json.loads(out3[out3.index("{"):])
+        n3 = len(j3["orphans"]) + len(j3["derived"]) + len(j3["junk"]) + len(j3["dupes"])
+        waste = sum(o["size"] for o in j3["orphans"]) + sum(d["size"] for d in j3["derived"]) \
+            + sum(x["size"] for x in j3["junk"])
+        w3 = f"{waste / 1024:,.1f} KB"
+    except (ValueError, KeyError, TypeError):
+        n3, w3 = -1, "?"
     if not quiet:
         print(f"  F 對賬（文檔承諾↔實際執行）：{'✅' if rc1 == 0 else '✗'} {tail1}")
         print(f"  F 優化點（建議，不算失敗）：{'✅ 0 條' if n2 == 0 else f'⚠️  {n2} 條'}")
+        print(f"  F 倉庫冗余（建議，不算失敗）：{'✅ 無' if n3 == 0 else f'⚠️  {n3} 項 / {w3}'}"
+              f"（清理：`python scripts/repo_hygiene.py --clean`）")
     return bad, 2
 
 

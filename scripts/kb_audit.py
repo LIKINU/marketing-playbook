@@ -74,15 +74,63 @@ def md_files():
 #     · 以 `python ` 開頭的命令示例
 REF_PAT = re.compile(r"`([^`\n]*?(?:references|scripts|cases)/[^`\n]+?\.(?:md|json|py|sh|docx))`")
 REF_SKIP = ("{", "}", "→", "|")
+# 裸文件名引用（反引号里只有文件名、不带目录前缀）—— 2026-09-18 補。
+#   為什麼要單獨認它：實測 SKILL.md 寫 `` `格式範本映射示例.json` ``（**繁體「範」**），
+#   而實際檔名是簡體「格式范本映射示例.json」→ **引用是壞的，但上面那條正則不認
+#   （它要求字串裡含 references/|scripts/|cases/ 前綴）→ 靜默放過**。
+#   判定規則保守：只問「倉庫裡有沒有任何一個檔叫這個名字」；有就放行，全倉都沒有才算斷鏈。
+BARE_PAT = re.compile(r"`([^`\n/]+?\.(?:md|json|py|sh|docx|pdf|txt))`")
+# 裸引用檢查要避開三類**合法寫法**（2026-09-18 實測，第一版誤報 51 處）：
+#   ① 運行時檔名 —— plan.md／rules.json… 本來就**不在倉庫裡**，是管線的輸入輸出；
+#   ② 簡寫後綴 —— 寫 `-原版.md` 表示「同名檔的後綴」，人看得懂，不是真引用；
+#   ③ 歷史變更記錄 —— `舊名.md → 新名.md` 這種**故意**提到已不存在的舊檔。
+BARE_WHITELIST = {
+    "plan.md", "skeleton.md", "skeleton.internal.md", "方案.docx", "方案.md",
+    "rules.json", "budget.json", "roles.json", "gate.json", "manifest.json",
+    "附件核对表.json", "refs.json", "banned.json", "checklist.json",
+}
+# ④ 已死檔案的明確標記 —— 正文**故意**提到「某檔已經不在了」時，那不是斷鏈，是記錄。
+#   2026-09-18 補：SKILL.md 的變更記錄寫「清掉 `references/范例/…-骨架示例.md`（全倉零引用）」，
+#   檔案確實刪了，但這行是**正確的歷史**。要求判據明說「已刪除」，而不是猜語氣 ——
+#   判據一含糊，下次就會放過真的斷鏈。
+DEAD_MARK = re.compile(r"已刪除|已移除|已退役|已廢除|舊名|原名|改名")
 
 
 def l1(quiet):
     bad, total, skipped = [], 0, 0
+    # 全倉 basename 索引（供裸文件名引用比對）
+    _all_base = {os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "**", "*"), recursive=True)
+                 if os.path.isfile(p) and "/.git/" not in p and "/.workbuddy/" not in p}
     for f in md_files():
         base_dir = os.path.dirname(f)
-        for m in REF_PAT.finditer(read(f)):
+        _src = read(f)
+        # ①a 裸文件名引用：反引號裡只有檔名（不帶目錄前綴）
+        for m in BARE_PAT.finditer(_src):
+            _b = m.group(1).strip()
+            if _b in ("SKILL.md", "AGENTS.md", "README.md", "") or "*" in _b:
+                continue          # 入口檔案與通配寫法不查
+            if (_b in BARE_WHITELIST
+                    or _b.startswith(("-", "…", "（", "("))
+                    or " " in _b):   # ① 運行時檔名 ② 簡寫後綴 ④ 含空格＝指令
+                continue
+            _line = _src[max(0, m.start() - 120):m.end() + 120]
+            if "→" in _line or "->" in _line or DEAD_MARK.search(_line):
+                continue          # ③ 歷史變更記錄（舊名 → 新名／已刪除的檔）
+            total += 1
+            if _b not in _all_base:
+                bad.append((os.path.relpath(f, ROOT),
+                            f"`{_b}`（**裸檔名引用，全倉找不到此檔**"
+                           f"—— 常見原因是簡繁寫錯，如 `格式範本映射示例.json` vs "
+                           f"`格式范本映射示例.json`）"))
+        for m in REF_PAT.finditer(_src):
             raw = m.group(1).strip()
             if any(s in raw for s in REF_SKIP) or raw.startswith(("python ", "$ ", "bash ")):
+                skipped += 1
+                continue
+            # 通配寫法（`scripts/*.py`、`references/*.md`）—— 在正文裡引用一個**模式**
+            # 不等於引用一個檔。2026-09-18 補：AGENTS.md 開始用 glob 舉例說明
+            # 「通用規則遮蔽專門規則」，這類寫法暴增。
+            if "*" in raw or "?" in raw:
                 skipped += 1
                 continue
             # 佔位寫法（`cases/xx.md`、`cases/NN-行业.md`）—— 是「舉例說明長什麼樣」，
@@ -91,6 +139,10 @@ def l1(quiet):
             if re.match(r"^(?:xx|XX|NN|N+|X+)[\-_.]", _fn):
                 skipped += 1
                 continue
+            _line2 = _src[max(0, m.start() - 120):m.end() + 120]
+            if "→" in _line2 or "->" in _line2 or DEAD_MARK.search(_line2):
+                skipped += 1
+                continue          # 歷史變更記錄／已刪除的檔（同上面那條的判據）
             total += 1
             cands = [os.path.join(ROOT, raw),
                      os.path.join(base_dir, raw),

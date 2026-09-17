@@ -166,12 +166,20 @@ def main():
     #    於是成稿裡寫的「單客獲取成本 X 元」永遠不會被複算 —— 寫錯也全綠）
     if md is not None and not data.get("unit_economics"):
         _ue = {}
-        for _k, _pat in (("cac", r"單客獲取成本|单客获取成本|CAC"),
-                         ("ltv", r"生命週期價值|生命周期价值|LTV"),
-                         ("payback", r"回本週期|回本周期")):
-            _m = re.search(_pat + r"[^\n]{0,20}?(\d+(?:\.\d+)?)", md)
-            if _m:
+        # ⚠️ 2026-09-17 修 BUG（投資人視角第 1 條，實測會崩）：
+        #   原寫法 `_pat + r"[^\n]{0,20}?(\d+)"` —— **捕獲組在第三個分支裡**，
+        #   一旦文字被前兩個分支（單客獲取成本／生命周期价值）命中，group(1) 就是 None，
+        #   float(None) → TypeError，腳本 exit 2。改成**整組加括號**，三個分支都帶捕獲。
+        for _k, _pat in (("cac", r"(?:單客獲取成本|单客获取成本|CAC)"),
+                         ("ltv", r"(?:生命週期價值|生命周期价值|LTV)"),
+                         ("payback", r"(?:回本週期|回本周期|回本周期\(月\))")):
+            _m = re.search(_pat + r"[^\n]{0,40}?(\d+(?:\.\d+)?)", md)
+            if _m and _m.group(1):
                 _ue[_k] = float(_m.group(1))
+        # 讀不到 CAC 或 LTV → 報出來（原先靜默跳過，等於「沒算」也算過）
+        for _need in ("cac", "ltv"):
+            if _need not in _ue:
+                print(f"  {NG} 成稿裡讀不到「{_need.upper()}」—— 單位經濟無法複算，請補齊五項")
         if len(_ue) >= 2:
             data["unit_economics"] = _ue
             print(f"→ 從成稿回讀到單位經濟：{_ue}（將參與複算）")

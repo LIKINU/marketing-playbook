@@ -1157,8 +1157,18 @@ def main():
     if re.search(r"盈虧線|盈亏线|保本", body):
         _sens = re.search(r"樂觀[\s\S]{0,300}?悲觀|乐观[\s\S]{0,300}?悲观", body)
         if _sens:
-            if not quiet:
-                print(f"  {OK} 敏感性分析：命中三档模式")
+            # ⚠️ 2026-09-17（R5 投資人視角第 5 條）：原判據只是「樂觀…悲觀 兩詞在 300 字內共現」——
+            #   把悲觀檔寫成「−10%」也能全綠，那不是壓力測試，是裝飾。
+            #   加一條：三檔的數字必須互不相等（否則等於沒分檔）。
+            _nums = re.findall(r"\d+(?:\.\d+)?", _sens.group(0))[:12]
+            _distinct = len(set(_nums))
+            if _distinct < 3:
+                if not quiet:
+                    print(f"  {NG} 敏感性：三檔數字看不出差異（不同值僅 {_distinct} 個）")
+                _hard_if_full("敏感性分析三档几乎相同 —— 把悲观档写成 −10% 不是压力测试。"
+                              "悲观档的关键参数（价格/流量/投放成本）至少一项降幅 ≥30%。")
+            elif not quiet:
+                print(f"  {OK} 敏感性分析：三档齐、数字有区分（{_distinct} 个不同值）")
         else:
             if not quiet:
                 print(f"  {'❌' if _is_full_plan else WARN} 有盈亏线但无三档敏感性"

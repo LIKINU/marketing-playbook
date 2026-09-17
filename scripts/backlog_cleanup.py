@@ -30,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CASES = os.path.join(ROOT, "references", "cases")
 
-OK, NG, WARN, HINT = "✅", "❌", "⚠️", "→"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _common import OK, NG, WARN, HINT   # noqa: E402  统一符号（不要在各自文件里重定义）
 
 # 「嚴禁公司背景」的偵測詞（與 case_lint 同源；此處獨立實現是為了**導清單**而非**判達標**）
 BG_WORDS = ["創始人", "创始人", "成立於", "成立于", "融資", "融资", "估值",

@@ -38,7 +38,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 REF = os.path.join(ROOT, "references")
 
-OK, NG, WARN, HINT = "✅", "❌", "⚠️", "→"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _common import OK, NG, WARN, HINT   # noqa: E402  统一符号（不要在各自文件里重定义）
 
 
 def read(p):

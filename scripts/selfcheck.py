@@ -934,6 +934,37 @@ def main():
         if not _ok:
             hard_errors.append("创意没有回指策略 —— 每个样稿必须写「回指：本条创意解决【打法 N】的第【X】步」。")
 
+    # 15g 议题树与假设台账（BCG 判据：没有议题树就写正文＝不合格）
+    #     ⚠️ 2026-09-17 把关范围收窄：原先的「无条件硬错误」会误伤**速览类快案**
+    #        （实测 smoke_test 的标杆稿 —— 一份便利店开学季快案 —— 因没有议题树被判硬错误）。
+    #        → 议题树是**完整版方案**的判据，不是速览稿的。改为：
+    #          · 稿里用了「〇 · 议题树与假设台账」这章 → 必须写够（硬错误）
+    #          · 稿是完整版（八篇骨架）却没用这章 → 硬错误（漏了 BCG 的题眼）
+    #          · 稿是速览类（没有完整八篇） → 只提醒，不拦
+    _has_issue_tree = "议题树与假设台账" in body
+    _is_full_plan = all(x in body for x in ["现状分析", "策略", "定位与口径", "预算明细"])
+    _h_all = re.findall(r"\bH(\d+)\b", body)
+    _distinct = sorted(set("H" + n for n in _h_all))
+    _refer = sorted(h for h in _distinct if body.count(h) >= 2)   # 定义＋被引≥1 次
+    if _has_issue_tree:
+        _ok_g = len(_distinct) >= 3 and len(_refer) >= 3
+        if not quiet:
+            print(f"  {OK if _ok_g else NG} 议题树：H 编号 {len(_distinct)} 条（需 ≥3）、"
+                  f"被正文引用 ≥1 次的 {len(_refer)} 条（需 ≥3）")
+        if not _ok_g:
+            hard_errors.append(
+                f"议题树与假设台账不达标 —— 需要 ≥3 条可证伪的 H，且每条在正文里至少被引用一次"
+                f"（现在有 {len(_distinct)} 条、被引 {len(_refer)} 条）。"
+                "写在台账里却不被回应，等于没做假设驱动。")
+    elif _is_full_plan:
+        if not quiet:
+            print(f"  {NG} 完整版方案缺「〇 · 议题树与假设台账」")
+        hard_errors.append(
+            "完整版方案缺「〇 · 议题树与假设台账」—— BCG 判据：没有议题树就写正文＝不合格。")
+    else:
+        if not quiet:
+            print(f"  {INFO} 未使用议题树结构（速览类快案可忽略）")
+
     # 15f 渠道不可移植元素
     _ch = [v for k, v in _secs.items() if "不同形态" in k]
     if _ch:

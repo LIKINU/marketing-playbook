@@ -755,6 +755,7 @@ def play_block(i, p, kmap, ind=""):
         # 却从来没被打印过 —— 方案只回答「花多少」，不回答「做不做得动」。
         f"｜制作难度：{_t2s_light(p.get('difficulty')) or FILL}\n"
         f"- **验收指标**：{_t2s_light(p['verify']) or FILL}\n"
+        f"- **不適用情況**（什麼時候**不要**用這條）：{_t2s_light(p.get('not_for')) or FILL}\n"
         f"- **可抄案例（别人怎么做的、结果如何）**：{cases}\n"
         f"- **为什么这么做（背后的道理，照这个改就不会跑偏）**：{why}\n"
     )
@@ -819,7 +820,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     )
 
     diagnosis = (
-        f"## 一 · 现状分析\n### 1.1 问题类型与目标\n"
+        f"## 一 · 现状分析\n> 本章回应：H【填】（证实／证伪）\n\n### 1.1 问题类型与目标\n"
         f"- 问题类型：**{cp}**（八类：认知／交易／渠道／信任／复购／定价／组织／合规）\n"
         f"- 生意目标：{FILL}\n\n### 1.2 真正的卡点\n"
         f"> {FILL}：不是 X —— 是 Y\n\n### 1.3 已排除的假设\n{FILL}\n\n"
@@ -834,7 +835,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
         f"> 至少要写 **2 条真实放弃** —— 只写约束不写放弃，等于没做取舍。\n\n"
     )
 
-    strategy = "## 二 · 策略\n### 2.0 打法组合（核心）\n\n"
+    strategy = "## 二 · 策略\n> 本章回应：H【填】（证实／证伪）\n\n### 2.0 打法组合（核心）\n\n"
     strategy += "".join(play_block(i + 1, p, kmap, ind) + "\n" for i, p in enumerate(plays))
     strategy += "### 2.0.1 可抄案例（别人是怎么做的、结果如何、我们怎么用）\n"
     for i, p in enumerate(plays):
@@ -871,6 +872,28 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     _btxt = "；".join(book_explain(b) for b in _pb[:2])
     _pos_theory = ("；".join(x for x in (_ptxt, _btxt) if x)
                    or "（本次打法未匹配到理论，按打法原理直接推导）")
+    # 2026-09-17 新增（BCG 视角第 5 条，R1 第 16 条）：**先证明没漏掉一整块，再谈怎么打**。
+    #   原骨架是「现状分析 → 策略 → 定位 → 触达 → 预算 → 执行」—— 这是**过程叙事**，
+    #   不是 BCG 的「问题树 → 假设 → 只收集能证伪的信息」。不加这一章，无法证明方案没有
+    #   漏掉一整块问题。
+    zeroth = (
+        "## 〇 · 议题树与假设台账（**先证明没漏掉一整块，再谈怎么打**）\n"
+        "> 判据：**没有议题树就写正文＝不合格。**\n\n"
+        "### 0.1 MECE 分解（把营收拆到因子，找漏钱最多的那层）\n"
+        "| 因子 | 当前值 | 目标值 | 差距 | 主因 |\n|---|---|---|---|---|\n"
+        f"| 流量 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"| 转化率 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"| 客单价 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"| 复购次数 | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"**最大缺口在【{FILL}】**（只选一层，选差距 × 可达性最高的那层）\n\n"
+        "### 0.2 假设台账（每条都可证伪）\n"
+        "| H# | 可证伪假设 | 所属分支 | 要什么数据 | 去哪拿 | 证伪则改做 |\n|---|---|---|---|---|---|\n"
+        f"| H1 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"| H2 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        f"| H3 | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n"
+        "> 假设必须**可证伪**（写得出来「若拿到什么，就说明我错了」）。\n\n"
+    )
+
     # 2026-09-17 新增（4A 视角第 2 条）：交付稿原先从「调研发现」直接跳到「定位语」，
     # 中间「洞察」那一跳没人做 —— 而洞察恰恰是 4A 体系的核心动作。
     insight = (
@@ -884,7 +907,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     )
 
     positioning = (
-        "## 三 · 定位与口径\n### 3.1 定位与差异化支点\n"
+        "## 三 · 定位与口径\n> 本章回应：H【填】（证实／证伪）\n\n### 3.1 定位与差异化支点\n"
         f"- 定位语（一句话）：{FILL}\n"
         f"- 学理依据（**按本次选中的打法反查**，不是通用套话）：{_pos_theory}\n"
         f"- 三个支点（各跟一个可查证事实）：{FILL}\n\n"
@@ -944,7 +967,7 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     _TIER_SCENE = {"标准": "标准", "大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}
     if not scene:
         scene = _TIER_SCENE.get(tier, "标准")
-    body = (head + diagnosis + strategy + insight + positioning + reach + copy_ + kpi
+    body = (head + zeroth + diagnosis + strategy + insight + positioning + reach + copy_ + kpi
             + budget + exec_ + scene_body(scene, client))
     return body
 
@@ -1132,6 +1155,44 @@ def scene_body(scene, client=""):
 #     交付稿要「乾淨可直接提交」，但施工說明／知識庫缺口／自檢單**不能丟** ——
 #     那就另開一份檔：只有執行 AI 與維護者看，永遠不進 .docx。
 # ─────────────────────────────────────────────────────────────
+FAILURE_LIB = os.path.join(REF, "04-失败归因总库.md")
+
+
+def parse_premortem(path=FAILURE_LIB):
+    """解析 `04-失败归因总库.md` 第三部分「接案時的失敗預演清單（34 條）」。
+    回傳 [(num:int, text:str, is_star:bool)]。"""
+    if not os.path.exists(path):
+        return []
+    t = read(path)
+    m = re.search(r"# 第三部分：接案時的「失敗預演」清單.*?(?=\n# 第四部分)", t, re.S)
+    if not m:
+        return []
+    out, cur = [], ""
+    for ln in m.group(0).split("\n"):
+        mm = re.match(r"^(\d+)\.\s*(\*\s*)?(.*)$", ln.strip())
+        if mm:
+            if cur:
+                out.append(cur)
+            cur = [int(mm.group(1)), mm.group(3), bool(mm.group(2))]
+        elif cur and ln.strip() and not ln.strip().startswith("##"):
+            cur[1] += " " + ln.strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def premortem_for(client, n=8):
+    """從 34 條裡選 n 條最相關的：★ 優先，其次按 bigram 與客戶狀況的重疊度。"""
+    items = parse_premortem()
+    if not items:
+        return []
+    cb = bigrams(client)
+    starred = [it for it in items if it[2]]
+    rest = [it for it in items if not it[2]]
+    rest.sort(key=lambda it: -len(bigrams(it[1]) & cb))
+    return starred + rest[: max(0, n - len(starred))]
+
+
 SELFCHECK_ROWS = [
     "门禁 13 项已问全（含目标字数）并写入《任务规则表》",
     "未经验证的假设已在文首单独标注",
@@ -1197,6 +1258,18 @@ def build_internal(rules, plays, kmap, ind, tier, today):
     lines.append("| # | 自检项 | 结果 |\n|---|---|---|\n")
     for n, r in enumerate(SELFCHECK_ROWS, 1):
         lines.append(f"| {n} | {r} | 【填】 |\n")
+
+    # 2026-09-17：**失敗預演**（`04-失败归因总库.md` 第三部分 34 條）。本倉庫曾
+    #   「46,010 字的庫零消費」（promise_check 實測）—— 因為沒有任何腳本真的讀它。
+    #   貝恩 agent 指出後接入：按客戶狀況選出最相關的若干條，供執行 AI 填 8.7 Red Team 用。
+    _pm_items = premortem_for(" ".join(str(v) for v in rules.get("gate", {}).values()), n=8)
+    if _pm_items:
+        lines.append("\n## 五之二 · 接案前失敗預演（來自 04 的 34 條，已按本案篩選）\n")
+        lines.append("> 用來填交付稿的「8.7 这个方案最可能怎么死」。**只進內部文件**，\n"
+                     "> 交付稿裡寫根因白話，**不寫「模式 NN」**（selfcheck 第【10】關會攔）。\n")
+        for num, txt, star in _pm_items:
+            mark = "（★重點）" if star else ""
+            lines.append(f"- **預演 {num}{mark}**：{_t2s_light(txt)}\n")
 
     # 2026-09-17：范式库（六档骨架＋逐节指引）。用户原话「每一个都需要有一个范式…
     #   不仅只有大纲，也需要有里面的内容可以参考」。

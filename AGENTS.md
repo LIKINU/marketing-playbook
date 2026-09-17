@@ -180,7 +180,8 @@ python scripts/run_pipeline.py \
 | ③ 預算 | `budget_check.py` | 分項加總 ≠ 合計 → 不准交付 |
 | ④ 自檢 | `selfcheck.py` | 缺章節／自檢單／內部文檔洩漏／打法組合／知識庫引用／**繁體** → 不准交付 |
 | ⑤ 深度診斷 | `depth_check.py` | **只診斷、不阻攔**（報告給你看，改不改由你決定） |
-| ⑥ 出稿 | `build_docx.py` | 內部再跑一次自檢，不過就拒絕生成 |
+| ⑥ 出稿 | `build_docx.py` | 內部再跑一次自檢，不過就拒絕生成。**支持真腳註**：正文寫 `……400 亿元[^1]，`，出處另起一行寫 `[^1]: 弗若斯特沙利文《…》2025, p.12`（定義行不進正文）—— 官方常把「引用須用腳註標明」列為硬項，而 python-docx 原生沒有腳註 API，由 `docx_footnote.py` 直接改寫 OOXML 裝配 |
+| ⑦ 交付形態核對 | `delivery_check.py` | **附件／封面／文件名／佔位符**。默認**大聲報告但不阻塞**（Demo 視頻、承諾書掃描件等附件不歸本管線產，管線分不清「還沒做」和「忘了做」）；加 `--strict-delivery` 則直接判定本次不完成 |
 
 > **為什麼要單一入口**：單獨跑這幾個腳本時，執行者很容易「忘記跑」「選擇性跑」「跑不過就手工繞過」。
 > 串成一條鏈之後，**用這個 skill 就必然經過代碼** —— 想拿到 `.docx`，只能從這條鏈走。
@@ -237,7 +238,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：第 -1 步導航 + 門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
-| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `build_paradigm.py`（六檔範式庫生成·拼裝前先驗骨架一致性）＋ `knowledge_map.json`（映射表）＋ `paradigm_data.py`（逐節填寫指引）＋ `structure_fix.py`（結構體檢·重編號·引用同步）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `build_paradigm.py`（六檔範式庫生成·拼裝前先驗骨架一致性）＋ `knowledge_map.json`（映射表）＋ `paradigm_data.py`（逐節填寫指引）＋ `structure_fix.py`（結構體檢·重編號·引用同步）＋ `docx_footnote.py`（真 Word 腳註裝配）＋ `delivery_check.py`（交付形態核對）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
 | `references/08-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |

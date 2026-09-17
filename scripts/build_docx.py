@@ -32,6 +32,9 @@ except ImportError:
     print("❌ 缺少 python-docx。請先安裝：pip install python-docx")
     sys.exit(1)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import docx_footnote as DOCX_FN   # noqa: E402  Word 腳註裝配器（python-docx 原生不支援）
+
 CN_FONT = "微軟雅黑"
 OK, NG, WARN = "✅", "❌", "⚠️"
 
@@ -97,18 +100,36 @@ def strip_inline(s):
     return s
 
 
-def add_paragraph_with_bold(doc, text, size=10.5, style=None):
+def add_text_runs(p, text, size=10.5, fn=None, bold_all=False, color=None):
+    """把一段行內文字渲染成 runs —— 同時處理 `**粗體**` 與 `[^label]` **真實腳註**。
+
+    為什麼要獨立出這個函式：腳註引用必須**獨占一個 run**，才能被 docx_footnote
+    準確地換成 `<w:footnoteReference/>`；如果和上下文擠在同一個 run 裡，
+    就只能靠拆 XML 猜邊界，必錯。所以這裡先按 `[^…]` 切段，每段腳註單獨出一個 run。
+    """
+    for seg in re.split(r"(\[\^[^\]]+\])", text):
+        if not seg:
+            continue
+        m = re.fullmatch(r"\[\^([^\]]+)\]", seg)
+        if m and fn is not None:
+            fid = fn.fid(m.group(1))
+            r = p.add_run(DOCX_FN.placeholder(fid))
+            set_run_font(r, size=size, bold=False, color=color)
+            continue
+        for part in re.split(r"(\*\*.+?\*\*)", seg):
+            if not part:
+                continue
+            if part.startswith("**") and part.endswith("**"):
+                r = p.add_run(part[2:-2]); set_run_font(r, size=size, bold=True, color=color)
+            else:
+                r = p.add_run(part); set_run_font(r, size=size, bold=bold_all, color=color)
+
+
+def add_paragraph_with_bold(doc, text, size=10.5, style=None, fn=None):
     p = doc.add_paragraph(style=style)
     p.paragraph_format.space_after = Pt(4)
     p.paragraph_format.line_spacing = 1.25
-    parts = re.split(r"(\*\*.+?\*\*)", text)
-    for part in parts:
-        if not part:
-            continue
-        if part.startswith("**") and part.endswith("**"):
-            r = p.add_run(part[2:-2]); set_run_font(r, size=size, bold=True)
-        else:
-            r = p.add_run(part); set_run_font(r, size=size)
+    add_text_runs(p, text, size=size, fn=fn)
     return p
 
 
@@ -123,8 +144,11 @@ def parse_table_block(block_lines):
     return rows
 
 
-def render_markdown(doc, md_text):
-    """把 Markdown 渲染進 docx，回傳收集到的標題（給目錄用）"""
+def render_markdown(doc, md_text, fn=None):
+    """把 Markdown 渲染進 docx，回傳收集到的標題（給目錄用）
+
+    `fn` = docx_footnote.FootnoteState；傳入即啟用**真腳註**渲染。
+    """
     headings = []
     lines = md_text.splitlines()
     i = 0
@@ -165,8 +189,7 @@ def render_markdown(doc, md_text):
                         val = row[ci] if ci < len(row) else ""
                         cells[ci].text = ""
                         para = cells[ci].paragraphs[0]
-                        r = para.add_run(strip_inline(val))
-                        set_run_font(r, size=9, bold=(ri == 0))
+                        add_text_runs(para, strip_inline(val), size=9, fn=fn, bold_all=(ri == 0))
                         if ri == 0:
                             shade(cells[ci])
                 doc.add_paragraph()
@@ -177,6 +200,7 @@ def render_markdown(doc, md_text):
         if m:
             level = len(m.group(1))
             text = strip_inline(m.group(2)).strip()
+            text = re.sub(r"\[\^[^\]]+\]", "", text)   # 標題裡的腳註標記直接去掉（標題不需要出處）
             if level <= 3:
                 h = doc.add_heading(level=min(level, 3))
                 r = h.add_run(text)
@@ -184,7 +208,7 @@ def render_markdown(doc, md_text):
                              color=RGBColor(0x1F, 0x1F, 0x1F))
                 headings.append((level, text))
             else:
-                add_paragraph_with_bold(doc, f"■ {text}", size=10.5)
+                add_paragraph_with_bold(doc, f"■ {text}", size=10.5, fn=fn)
                 headings.append((4, text))
             i += 1
             continue
@@ -193,8 +217,11 @@ def render_markdown(doc, md_text):
         if s.startswith(">"):
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Cm(0.6)
-            r = p.add_run(strip_inline(s.lstrip("> ").strip()))
-            set_run_font(r, size=9.5, color=RGBColor(0x60, 0x60, 0x60))
+            # ⚠️ 這裡原本是 `p.add_run(strip_inline(...))` —— 繞過了 add_text_runs，
+            #    導致**引用塊裡的 `[^n]` 不會變成腳註**，而是以字面 `[^3]` 留在正文裡
+            #    （實測：3 條腳註只裝配出 2 條）。凡正文內容一律走 add_text_runs。
+            add_text_runs(p, strip_inline(s.lstrip("> ").strip()), size=9.5, fn=fn,
+                          color=RGBColor(0x60, 0x60, 0x60))
             i += 1
             continue
 
@@ -216,7 +243,7 @@ def render_markdown(doc, md_text):
                 body = num + ". " + text
             else:
                 body = "・" + text
-            p = add_paragraph_with_bold(doc, body, size=10.5)
+            p = add_paragraph_with_bold(doc, body, size=10.5, fn=fn)
             if indent >= 2:   # 嵌套列表：按縮進層級縮排（舊版一律壓平）
                 p.paragraph_format.left_indent = Cm(0.5 * (indent // 2))
             elif marker[0].isdigit():   # 有序列表：懸掛縮排，數字與正文對齊
@@ -231,7 +258,7 @@ def render_markdown(doc, md_text):
             continue
 
         # 一般段落
-        add_paragraph_with_bold(doc, s, size=10.5)
+        add_paragraph_with_bold(doc, s, size=10.5, fn=fn)
         i += 1
 
     return headings
@@ -336,6 +363,16 @@ def main():
         md = f.read()
     md_body = re.sub(r"^---\n.*?\n---\n", "", md, flags=re.S)
 
+    # ---- 腳註（2026-09-17 新增）----
+    #   Markdown 約定：正文寫 `……400 億元[^1]，`，出處單獨一行寫 `[^1]: 來源, 頁碼`。
+    #   定義行會被抽走（不進正文），引用處在渲染時打成獨占 run 的佔位符，
+    #   存檔後由 docx_footnote 裝配成**真正的 Word 腳註**（頁腳就地顯示出處）。
+    #   為什麼值得專門做：官方提交規範把「引用須用腳註標明」列為硬項，
+    #   而 python-docx 原生沒有腳註 API —— 不做就只能用表格出處列湊，那是另一種東西。
+    md_body, fn_defs = DOCX_FN.extract_definitions(md_body)
+    FN = DOCX_FN.FootnoteState(fn_defs)
+    _fn_refs = DOCX_FN.count_refs(md_body)
+
     # 交付稿須簡體（SKILL 硬要求）—— 出稿前大聲提醒（不阻攔，但必須知道）
     _trad = set("們個這說對產麼無為與於還進來過學經銷廣價範實樣觀點圍優質讓覺聲話術確認據應該務專態勢將團隊費責機構營運畫計劃達標類數據網絡歷總轉發構則議權")
     _hit = sorted({ch for ch in md_body if ch in _trad})
@@ -400,7 +437,7 @@ def main():
 
     # ---- 正文 ----
     doc.add_page_break()
-    render_markdown(doc, md_body)
+    render_markdown(doc, md_body, FN)
 
     # ---- 保存 ----
     out = args.output
@@ -409,9 +446,37 @@ def main():
     _dir = os.path.dirname(os.path.abspath(out))
     os.makedirs(_dir, exist_ok=True)   # 輸出目錄不存在時自動建立（舊版會直接拋錯）
     doc.save(out)
+
+    # ---- 腳註裝配（存檔後改寫 zip：footnotes.xml ＋ 引用 run）----
+    if FN.order:
+        _items = [(i + 1, FN.text_of(l)) for i, l in enumerate(FN.order)]
+        _n = DOCX_FN.install_footnotes(out, _items)
+        _miss = [l for l in FN.order if l not in fn_defs]
+        # ⚠️ 分母要用「正文引用**處數**」而不是「腳註**條數**」：同一條腳註可以引用多次
+        #    （本測試裡 2 條腳註共 4 處引用），拿 2 當分母會誤報「4/2 處成功」。
+        if _fn_refs and _n != _fn_refs:
+            _left = 0
+            try:
+                import zipfile as _zf
+                with _zf.ZipFile(out) as _z:
+                    _left = len(re.findall(r"\[\^[^\]]+\]",
+                                          _z.read("word/document.xml").decode("utf-8")))
+            except Exception:
+                pass
+            print(f"{WARN} 腳註定位：{_n}/{_fn_refs} 處引用成功"
+                  + (f"，正文殘留 {_left} 處字面 `[^n]` 標記" if _left else "")
+                  + " —— 有渲染路徑漏了腳註處理，請檢查")
+        if _miss:
+            print(f"{WARN} 有 {len(_miss)} 條引用沒給出處（{'、'.join(_miss[:6])}）"
+                  f"—— 已寫成「（未给出处：…）」供人工補")
+    elif _fn_refs:
+        print(f"{WARN} 正文有 {_fn_refs} 處腳註引用，但渲染時沒抓到 —— 請檢查是否寫在表格/標題裡")
+
     size_kb = os.path.getsize(out) / 1024
     print(f"{OK} 已生成：{out}（{size_kb:.0f} KB）")
     print(f"   · 封面 + 目錄 + 正文 + 頁碼 + 表格樣式")
+    if FN.order:
+        print(f"   · 腳註 {len(FN.order)} 條（Word 頁腳就地顯示出處，非文末來源表）")
     print(f"   · 正文共 {len(headings)} 個標題節點")
     print(f"   · 提醒：目錄為手工生成，內容有改動時請重新生成本檔（Word 不會自動更新）")
 

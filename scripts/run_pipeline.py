@@ -50,7 +50,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OK, NG, HINT = "✅", "❌", "→"
+OK, NG, WARN, HINT = "✅", "❌", "⚠️", "→"
 
 STEPS = [
     # (顯示名, 腳本, 是否阻斷)
@@ -86,6 +86,12 @@ def main():
     ap.add_argument("--date", default="")
     ap.add_argument("--author", default="")
     ap.add_argument("--banned", default="", help="自訂禁用詞表 JSON（透傳給 selfcheck／build_docx）")
+    ap.add_argument("--manifest", default="", help="附件核对表 JSON（透傳給 delivery_check；可用其 --init 生成）")
+    ap.add_argument("--cover-allow", default="", help="封面允许的要素，逗号分隔（如 项目名称,团队名称）")
+    ap.add_argument("--name-pattern", default="", help="文件名规范正则（如 ^项目-团队-队长$）")
+    ap.add_argument("--strict-delivery", action="store_true",
+                    help="交付形态核对未通过时**直接判定本次不完成**（默认只大声报告、不阻塞 —— "
+                         "因为 Demo 视频／承诺书扫描件等附件不归本管线产，管线无法区分「还没做」和「忘了做」）")
     ap.add_argument("--force", action="store_true", help="緊急出口：透傳給 build_docx（交付時必須聲明未校驗）")
     a = ap.parse_args()
 
@@ -159,6 +165,38 @@ def main():
         docx_args += ["--force"]
     rc = run("build_docx.py", docx_args, STEPS[5][0])
 
+    # ⑦ 交付形態核對（2026-09-17 新增）—— 附件／封面／文件名／佔位符
+    #    為什麼放在出稿**之後**、且默認只報告不攔：
+    #      必交附件裡有幾件（Demo 視頻、承諾書簽字掃描件）根本不是這條管線能產的，
+    #      是人和別的工序做的。管線無法判斷「還沒做」和「忘了做」，
+    #      所以它把缺項**大聲列出來**、點名「本次不算完整交付」，
+    #      由人或 `--strict-delivery` 決定要不要卡死。
+    #      ⛔ 绝不能静默通过 —— 那正是这次要修的「没人管」。
+    deliveries_ok = True
+    _dc = os.path.join(HERE, "delivery_check.py")
+    if os.path.exists(_dc):
+        print("\n" + "-" * 64)
+        print("⑦ 交付形態核對（delivery_check.py）")
+        print("-" * 64)
+        dc_args = ["--dir", os.path.dirname(os.path.abspath(a.out))]
+        if a.manifest:
+            dc_args += ["--manifest", a.manifest]
+        if a.cover_allow:
+            dc_args += ["--cover-allow", a.cover_allow]
+        if a.name_pattern:
+            dc_args += ["--name-pattern", a.name_pattern]
+        print()
+        sys.stdout.flush()   # 子進程直接寫同一個 stdout；不 flush 父進程的緩衝輸出會跑到它後面
+        rc_dc = subprocess.call([sys.executable, _dc] + dc_args)
+        if rc_dc != 0:
+            deliveries_ok = False
+            if a.strict_delivery:
+                failures.append("交付形态核对未通过（附件／封面／文件名／占位符，见上表）")
+    else:
+        deliveries_ok = False
+        if a.strict_delivery:
+            failures.append("找不到 delivery_check.py —— 交付形态未经核对")
+
     print("\n" + "=" * 64)
     if rc != 0 or not os.path.exists(a.out):
         print(f"{NG} 出稿失敗 —— 沒有拿到 .docx，本次不算完成。")
@@ -175,6 +213,9 @@ def main():
         print("=" * 64)
         sys.exit(1)
     print(f"{OK} 全鏈通過，已出稿：{a.out}（{size // 1024} KB）")
+    if not deliveries_ok:
+        print(f"{WARN} 交付形態未全過 —— 見上方 ⑦ 表。**這幾件不歸本管線產**，"
+              f"請人工補齊後再提交；用 `--strict-delivery` 可讓它直接卡死。")
     print(f"{HINT} 別忘了：把 12 項《交付自檢單》原樣輸出在回覆中（協議 3）。")
     print("=" * 64)
     sys.exit(0)

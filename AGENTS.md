@@ -237,7 +237,7 @@ python scripts/build_docx.py plan.md -o 方案.docx --title "客戶名 營銷方
 | 檔案 | 作用 | 什麼時候讀 |
 |---|---|---|
 | `SKILL.md` | **唯一入口**：第 -1 步導航 + 門禁 + 六步工作流 + 交付規範 + 自檢清單 | 永遠先讀 |
-| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `build_paradigm.py`（六檔範式庫生成·拼裝前先驗骨架一致性）＋ `knowledge_map.json`（映射表）＋ `paradigm_data.py`（逐節填寫指引）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
+| `scripts/` | **腳本強制層**：**`flow.py`（流程嚮導）＋ `composer.py`（組裝引擎·知識機械注入）＋ `build_paradigm.py`（六檔範式庫生成·拼裝前先驗骨架一致性）＋ `knowledge_map.json`（映射表）＋ `paradigm_data.py`（逐節填寫指引）＋ `structure_fix.py`（結構體檢·重編號·引用同步）** ＋ **`run_pipeline.py`（唯一出稿入口）** ＋ `reformat_to_template.py`（按範本重排）＋ `gate_check` / `budget_check` / `selfcheck` / `depth_check` / `build_docx` | 產出交付物時**必用**（見 §四點五） |
 | `references/08-操作流程SOP.md` | ⭐ **逐步操作手冊**：接案到出稿每一步的 輸入／命令／產出／校驗 | **一接案就讀** |
 | `README.md` | 給人看的說明書 | 使用者想了解怎麼用時 |
 | `AGENTS.md` | 本檔：跨工具接入 | 接入新平台時 |

@@ -408,8 +408,12 @@ def main():
         _thin = []
         for i, blk in enumerate(_pb[1:], 1):
             m = re.search(r"(?:为什么这么做|为什么這麼做|理论依据|理論依據)[^\n]*?[：:]\s*(.+)", blk)
-            body = (m.group(1) if m else "").strip()
-            solid = len(re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", body))
+            # ⚠️ 2026-09-17 修：這裡原本寫 `body = ...`，**覆蓋掉上面第 147 行定義的全文變數 `body`**。
+            #    後果：【11】場景完整性與【13】交叉引用都變成在對「某條打法的『為什麼』那半行」
+            #    做檢查 → 永遠 0 命中 → 看起來全綠，其實整關從未生效。
+            #    這是典型的「校驗器自己壞掉、卻回報通過」，比沒有校驗更危險。
+            _why_txt = (m.group(1) if m else "").strip()
+            solid = len(re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", _why_txt))
             if solid < 25:
                 _thin.append(i)
         if _thin:
@@ -589,6 +593,116 @@ def main():
         if not quiet:
             print(f"  {WARN} 未使用場景結構（無「九 ·」章節）—— 若為大賽／B端／G端／投標 交付，須補場景章節")
         warnings.append("未檢測到場景章節（## 九 ·）。若本案為大賽／B端／G端／投標 交付，需補該場景必有的章節（見 references/09-完整策劃標準與評分表.md）")
+
+    # ── 【13】交叉引用與編號連續性（2026-09-17 新增）
+    #    為什麼要這一關：瞳話案前 12 關全綠，卻有 **4 處**「詳見第三部分 1.1 的反对意见」
+    #    指向**根本不存在的章節**，而且團隊十章編號重複（「三」出現兩次）／倒序
+    #    （一→三→二）／斷號（十章裡的「十」消失）。
+    #    → 前 12 關查的都是「這份檔案自己的性質」；「指到別處的引用是否真的指得到」
+    #      是**跨章節**的性質，沒有一關在查 —— 同一類「零件全合格、傳動軸是斷的」漏檢。
+    #    判定：引用指向不存在的章節／章號重複／子編號重複 → 硬錯誤；
+    #          章號非遞增、章內子編號非遞增 → 警告（不攔，但交付前要人工確認）。
+    if not quiet:
+        print("\n【13】交叉引用與編號連續性（指向不存在的章節＝硬錯誤）")
+    _cn = {c: i for i, c in enumerate("一二三四五六七八九十", 1)}
+    _part = None
+    _idx = set()                 # (部分, A.B) —— 真實存在的子章節
+    _chaps = []                  # (部分, 中文章號, 章名)
+    _subs = {}                   # (部分, 桶) -> [A.B ...] 按出現順序
+    _cur = None                  # 當前「### 中文數字、」章號
+    _sec = ""                    # 當前「##」節標題（給沒章號的子節歸桶，避免誤判非遞增）
+    for _l in body.split("\n"):
+        _m = re.match(r"^#\s*第([一二三四五六七八九十]+)部分", _l)
+        if _m:
+            _part, _cur, _sec = _m.group(1), None, ""
+            continue
+        _m = re.match(r"^##\s+(.+?)\s*$", _l)
+        if _m:                    # 進入新的 ## 節 → 上一個「### 章」的作用域結束
+            _cur, _sec = None, _m.group(1)
+            continue
+        _m = re.match(r"^###\s*([一二三四五六七八九十]+)、(.+?)\s*$", _l)
+        if _m:
+            _cur = _m.group(1)
+            _chaps.append((_part, _cur, _m.group(2)))
+            continue
+        _m = re.match(r"^#{3,4}\s*([0-9]+\.[0-9]+)\s", _l)
+        if _m:
+            _idx.add((_part, _m.group(1)))
+            _bucket = _cur if _cur else f"§{_sec}"
+            _subs.setdefault((_part, _bucket), []).append(_m.group(1))
+
+    # ① 交叉引用：帶部分號的「第X部分 A.B」必須指得到
+    _tot = _dangling = 0
+    _bad_refs = []
+    for _m in re.finditer(r"第([一二三四五六七八九十]+)部分\s*([0-9]+\.[0-9]+)", body):
+        _tot += 1
+        if (_m.group(1), _m.group(2)) not in _idx:
+            _dangling += 1
+            _s = max(0, _m.start() - 40)
+            _bad_refs.append(f"第{_m.group(1)}部分 {_m.group(2)} —— 指向不存在的章節"
+                             f"（上下文：…{body[_s:_m.end() + 16].replace(chr(10), ' ')}…）")
+    if not quiet:
+        print(f"  {OK if not _dangling else NG} 帶部分號的引用 {_tot} 處，指向不存在章節 {_dangling} 處")
+        for _b in _bad_refs[:6]:
+            print(f"       ✗ {_b}")
+    if _dangling:
+        hard_errors.append(f"交叉引用 {_dangling} 處指向不存在的章節（共 {_tot} 處引用）："
+                           + "；".join(_bad_refs[:4])
+                           + "　→ 改結構後必須同步改引用（見 references/11-防返工交付协议.md 鐵律 4）")
+
+    # ② 章號重複
+    _seen, _dups = {}, []
+    for _p, _c, _n in _chaps:
+        _k = (_p, _c)
+        if _k in _seen:
+            _dups.append(f"第{_p}部分「{_c}、{_n}」與「{_c}、{_seen[_k]}」編號重複")
+        _seen[_k] = _n
+    if not quiet:
+        print(f"  {OK if not _dups else NG} 章節（### 中文數字、）共 {len(_chaps)} 個，編號重複 {len(_dups)} 處")
+        for _d in _dups[:6]:
+            print(f"       ✗ {_d}")
+    if _dups:
+        hard_errors.append("章節編號重複：" + "；".join(_dups[:4]))
+
+    # ③ 同一部分內子編號重複
+    _sub_dup = []
+    for _p in {p for p, _, _ in _chaps} | {p for p, _ in _idx}:
+        _by = [s for (pp, s) in _idx if pp == _p]
+        for _s in set(_by):
+            if _by.count(_s) > 1:
+                _sub_dup.append(f"第{_p}部分子編號 {_s} 出現 {_by.count(_s)} 次")
+    if not quiet:
+        print(f"  {OK if not _sub_dup else NG} 同部分內子編號重複 {len(_sub_dup)} 處")
+        for _d in _sub_dup[:6]:
+            print(f"       ✗ {_d}")
+    if _sub_dup:
+        hard_errors.append("子章節編號重複：" + "；".join(_sub_dup[:4]))
+
+    # ④ 章號是否遞增（同一部分內）
+    _order_bad = []
+    _lastp, _last = None, 0
+    for _p, _c, _n in _chaps:
+        if _p != _lastp:
+            _lastp, _last = _p, 0
+        _v = _cn.get(_c, 0)
+        if _v and _v < _last:
+            _order_bad.append(f"第{_p}部分：「{_c}、{_n}」排在更大的編號之後（應遞增）")
+        _last = max(_last, _v)
+    # ⑤ 章內子編號是否遞增
+    _sub_order_bad = []
+    for _k, _lst in _subs.items():
+        _se = [int(x.split(".")[1]) for x in _lst]
+        if _se != sorted(_se):
+            _bad_at = next(i for i in range(1, len(_se)) if _se[i] < _se[i - 1])
+            _sub_order_bad.append(f"第{_k[0]}部分「{_k[1]}」章內子編號非遞增："
+                                  f"{_lst[_bad_at - 1]} → {_lst[_bad_at]}")
+    if not quiet:
+        _nw = len(_order_bad) + len(_sub_order_bad)
+        print(f"  {OK if not _nw else WARN} 編號順序問題 {_nw} 處（章號倒序／章內子編號非遞增）")
+        for _d in (_order_bad + _sub_order_bad)[:6]:
+            print(f"       ⚠ {_d}")
+    for _d in _order_bad + _sub_order_bad:
+        warnings.append(_d + "　→ 建議按正文出現順序重編號（結構一改就要同步改引用）")
 
     # 結論
     print("\n" + "=" * 64)

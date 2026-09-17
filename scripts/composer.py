@@ -657,6 +657,56 @@ def model_explain(code, nsteps=4):
     return _t2s_light(out)
 
 
+# 「⚠️ 歸因提醒」索引：清單行不帶它（它在**深度卡**裡），所以先建品牌→提醒的索引。
+#  2026-09-17（教材一致性審計第 1 條）：深度卡寫了 412 處歸因護欄，
+#  而 card_line_public 只注入「做法 ▶ 結果」—— 護欄被機械剝掉，下游必然把相關寫成因果。
+_CAVEAT_CACHE = {}
+
+
+def _caveat_index():
+    if _CAVEAT_CACHE:
+        return _CAVEAT_CACHE
+    import glob as _glob
+    for _f in sorted(_glob.glob(os.path.join(REF, "cases", "*.md"))):
+        try:
+            _t = read(_f)
+        except Exception as _e:
+            # 不许静默：读不到就等于**这张卡的归因护栏取不到**，
+            # 而调用方看到的是「这条案例没有护栏」—— 与事实不同。
+            print(f"  ⚠️ 归因提醒索引跳过（读不了）：{os.path.basename(_f)}（{type(_e).__name__}）")
+            continue
+        for _blk in re.split(r"(?m)^###\s+", _t)[1:]:
+            _head = _blk.split("\n", 1)[0]
+            _m = (re.search(r"⚠️?\s*\*{0,2}歸因提醒\*{0,2}\s*[：:]\s*(.+)", _blk)
+                  or re.search(r"⚠️?\s*\*{0,2}归因提醒\*{0,2}\s*[：:]\s*(.+)", _blk))
+            if not _m:
+                continue
+            # 深度卡標題形如 `### 3.1 珀萊雅｜「早 C 晚 A」大單品戰略（2020 起）`
+            #   —— 品牌在 `｜` 之前，**沒有加粗**（第一版只找 `**品牌**`，索引因此全空）。
+            _bm = re.search(r"\*\*([^*]{2,24})\*\*", _head)
+            _name = _bm.group(1).strip() if _bm else ""
+            if not _name:
+                _h2 = re.sub(r"^[\d.\s]+", "", _head)          # 去掉 "3.1 "
+                _name = re.split(r"[｜|·・（(]", _h2)[0].strip()
+            if _name:
+                _CAVEAT_CACHE.setdefault(_name, _m.group(1).strip())
+    return _CAVEAT_CACHE
+
+
+def _caveat_for(brand):
+    """按品牌取歸因提醒；精確命中優先，否則取「包含關係」最長的一個。"""
+    if not brand:
+        return ""
+    idx = _caveat_index()
+    if brand in idx:
+        return idx[brand]
+    cands = [(k, v) for k, v in idx.items() if k in brand or brand in k]
+    if not cands:
+        return ""
+    cands.sort(key=lambda kv: -len(kv[0]))
+    return cands[0][1]
+
+
 def card_line_public(c, maxlen=260):
     """案例卡 → 交付稿用的一行（**不帶 `cases/xx.md` 路徑與卡號**）。
 
@@ -666,11 +716,23 @@ def card_line_public(c, maxlen=260):
     brand = re.split(r"\s*[·・]\s*", c["brand"])[0].strip()
     body = c.get("what") or c.get("one") or ""
     res = c.get("result") or ""
+    # ⚠️ 2026-09-17（教材一致性審計第 5 條）：README §六 與 01 §二.2 都寫
+    #   「【未核實】不得進對外交付物」，而裝配器**照搬** —— 實測 615 條清單「結果」行裡
+    #   有 79 條（12.8%）帶【未核實】。教材的硬規則在自家工具裡失效。
+    #   → 宁缺勿错：帶標記的結果整句丢弃（保留做法，不保留未核實的數字）。
+    if re.search(r"未核實|未核实|待核實|待核实", res):
+        res = ""
     txt = f"**{brand}**" if brand else ""
     if body:
         txt += f" —— {body}"
     if res:
         txt += f"　▶ 结果：{res}"
+    # ⚠️ 2026-09-17（教材一致性審計第 1 條）：深度卡裡寫了 412 處「⚠️歸因提醒」，
+    #   而 card_line_public 只注入「做法 ▶ 結果」—— 护栏被機械剝掉，
+    #   下游必然把「相關」寫成「因果」。這裡把歸因提醒一併帶出去（截斷到 60 字）。
+    _caveat = c.get("caveat") or _caveat_for(brand)
+    if _caveat:
+        txt += f"　（归因提醒：{_caveat[:60]}）"
     txt = _t2s_light(txt).strip()
     if len(txt) > maxlen:
         txt = txt[:maxlen].rstrip() + "…"
@@ -728,7 +790,9 @@ def play_block(i, p, kmap, ind=""):
         # 2026-09-17：这里原本把案例全文印一遍，而 2.0.1 又逐条印一遍 →
         # 同一段文字在交付稿里出现两次（实测 4 处），违反了 SKILL「全文不允许逐字
         # 重复的段落」，却没有任何关卡管。改为**只留一行索引**，正文只在 2.0.1 展开。
-        _brands = "、".join((card_line_public(c, 600).split("——")[0].strip() or "（案例）")
+        # ⚠️ 索引行只放**品牌名**：归因提醒由 2.0.1 的展开行统一承载，
+        #    否则同一条提醒会在两处出现（刚修完的「逐字重复」又回来了）。
+        _brands = "、".join((c.get("brand", "").split("·")[0].strip() or "（案例）")
                             for cf, c, src in picks)
         cases = f"\n  - 可抄案例：{_brands}（展开与「我们怎么用」见 **2.0.1**）"
     else:
@@ -817,6 +881,11 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
         f"## 执行摘要\n- 目标：{FILL}\n- 主线一句话：{FILL}\n"
         f"- 核心打法：{'、'.join(_t2s_light(p['name']) for p in plays)}\n"
         f"- 预期 KPI：{FILL}\n- 盈亏线：{FILL}\n\n"
+        # 2026-09-17（評審側審計第 7 條）：SKILL 承諾「核心結論卡片 —— 一張表講完關鍵數字」，
+        #   範例稿裡也有，而 composer 從不生成 → 決策者只能從數萬字裡扒重點。
+        f"### 核心结论卡片（**决策者只看这一张就够**）\n"
+        f"| 目标 | 投入 | 预期回报 | 保本点 | 最大风险 | 谁执行 |\n|---|---|---|---|---|---|\n"
+        f"| {FILL} | {FILL} | {FILL} | {FILL} | {FILL} | {FILL} |\n\n"
     )
 
     diagnosis = (
@@ -1023,7 +1092,11 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     _TIER_SCENE = {"标准": "标准", "大赛": "大赛", "B端": "B端", "G端": "G端", "投标": "投标"}
     if not scene:
         scene = _TIER_SCENE.get(tier, "标准")
-    body = (head + zeroth + diagnosis + strategy + insight + positioning + reach + copy_ + kpi
+    # ⚠️ 2026-09-17（評審側審計第 5 條）：議題樹（兩張大空表）原本壓在「現狀分析」之前，
+    #   實測「### 1.2 真正的卡點」之前有 42 個【填】、841 字 —— 決策者只看前兩頁，
+    #   看到的是兩張空表，看不到「方案的核心判斷」，容易被判「沒有結論」。
+    #   → 把 〇 章移到現狀分析之後：先給判斷，再給推導。
+    body = (head + diagnosis + zeroth + strategy + insight + positioning + reach + copy_ + kpi
             + budget + exec_ + scene_body(scene, client))
     return body
 
@@ -1101,13 +1174,21 @@ SCENE_SECTIONS = {
         "| 2:30–5:00 | 核心策略与打法（挑最强的 2–3 条深讲） | {FILL} |\n"
         "| 5:00–7:00 | 创意与执行（亮样稿） | {FILL} |\n"
         "| 7:00–8:00 | 预算与预期效果（收尾回到结论） | {FILL} |\n\n"
+        # 2026-09-17（評審側審計第 3 條）：标题写「10 个最可能被问的」，实际只有 4 条实问
+        #   ＋1 条空的（且官方要求就是 10 个）。现场问答占 30–50 分，答到第 5 问就哑。
+        #   → 补足 10 条，并强制「证据在第几页」——评委最烦「答了但拿不出东西」。
         "## 十二 · 评委问答预判（10 个最可能被问的）\n"
-        "| # | 预判问题 | 标准答法 |\n|---|---|---|\n"
-        "| 1 | 为什么选这个人群／这个方向？ | {FILL} |\n"
-        "| 2 | 预算为什么这么分？ | {FILL} |\n"
-        "| 3 | 效果怎么衡量？数据从哪来？ | {FILL} |\n"
-        "| 4 | 竞品已经在做了，你们有什么不同？ | {FILL} |\n"
-        "| 5 | {FILL} | {FILL} |\n\n"
+        "| # | 预判问题 | 标准答法 | 证据在第几页 |\n|---|---|---|---|\n"
+        "| 1 | 为什么选这个人群／这个方向？ | {FILL} | {FILL} |\n"
+        "| 2 | 预算为什么这么分？ | {FILL} | {FILL} |\n"
+        "| 3 | 效果怎么衡量？数据从哪来？ | {FILL} | {FILL} |\n"
+        "| 4 | 竞品已经在做了，你们有什么不同？ | {FILL} | {FILL} |\n"
+        "| 5 | 这套方案的洞察是怎么得出来的？（**评委最爱的追问**） | {FILL} | {FILL} |\n"
+        "| 6 | 如果预算砍一半，你砍哪一部分？ | {FILL} | {FILL} |\n"
+        "| 7 | 你调研的样本代表谁？偏差在哪？ | {FILL} | {FILL} |\n"
+        "| 8 | 执行风险最大的是哪一环？兜底是什么？ | {FILL} | {FILL} |\n"
+        "| 9 | 创意里哪个元素是「换任何品牌也成立」的？你们怎么避开的？ | {FILL} | {FILL} |\n"
+        "| 10 | 这套方案最可能怎么死？ | {FILL} | {FILL} |\n\n"
         "## 附件 · 一手调研材料（官方要求「调查表附后」）\n"
         "- 调查问卷原件：{FILL}\n- 访谈／走访记录：{FILL}\n"
         "- 数据来源清单（来源／口径／时点）：{FILL}\n- 物料完稿：{FILL}\n\n"
@@ -1164,8 +1245,13 @@ SCENE_SECTIONS = {
         "- **组织保障**：领导小组 {FILL}；牵头单位 {FILL}；配合单位 {FILL}\n"
         "- **督导与考核机制**：{FILL}\n\n"
         "## 十二 · 汇报与评审\n"
+        # 2026-09-17（評審側審計第 3 條）：原为一行占位反复列出九个词，
+        #   等于把 9 页活推给模型。改成 9 行表，每页一句结论 + 数据出处。
         "### 12.1 汇报稿／PPT 骨架\n"
-        "- 封面／背景／依据／目标／任务／实施／预算／绩效／保障 逐页：{FILL}\n\n"
+        "| 页 | 标题 | 一句话结论 | 数据／出处 |\n|---|---|---|---|\n"
+        + "".join(f"| {_p} | {FILL} | {FILL} | {FILL} |\n"
+                  for _p in ["封面", "背景", "依据", "目标", "任务",
+                             "实施", "预算", "绩效", "保障"]) + "\n"
         "### 12.2 评审答疑口径\n"
         "| # | 预判问题 | 标准答法 |\n|---|---|---|\n"
         "| 1 | 政策依据充分吗？ | {FILL} |\n"

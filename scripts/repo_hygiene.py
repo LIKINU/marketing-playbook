@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-repo_hygiene.py —— 倉庫冗餘／衛生掃描（存量維護用）
+repo_hygiene.py —— 仓库冗余／卫生扫描（存量维护用）
 
-為什麼需要這支腳本
+为什么需要这支脚本
 ------------------
-既有的 6 支校驗腳本 + kb_audit.py 查的都是「**內容對不對**」（引用通不通、
-卡片齊不齊、模型可不可達）。**沒有一支查「這個檔案該不該存在」** ——
-於是倉庫會慢慢長出三類冗余：
+既有的 6 支校验脚本 + kb_audit.py 查的都是「**内容对不对**」（引用通不通、
+卡片齐不齐、模型可不可达）。**没有一支查「这个文件案该不该存在」** ——
+于是仓库会慢慢长出三类冗余：
 
-  ① 孤兒檔（orphan）：全倉零入鏈引用，沒人知道它為什麼在
-  ② 派生物（derived）：`.docx`／`.pdf` 等可由源檔＋腳本再生，卻被當成資產入庫
-  ③ 本機垃圾（junk）：`.DS_Store`／`__pycache__`／`實測-*` 測試殘留
+  ① 孤儿档（orphan）：全仓零入链引用，没人知道它为什么在
+  ② 派生物（derived）：`.docx`／`.pdf` 等可由源档＋脚本再生，却被当成资产入库
+  ③ 本机垃圾（junk）：`.DS_Store`／`__pycache__`／`实测-*` 测试残留
 
-三類都不影響「知識庫是否連通」，所以既有的斷鏈審計永遠看不到它們。
-本腳本補的正是這一格。
+三类都不影响「知识库是否连通」，所以既有的断链审计永远看不到它们。
+本脚本补的正是这一格。
 
 用法
 ----
-    python scripts/repo_hygiene.py              # 掃描並出報告（只讀，不改任何東西）
-    python scripts/repo_hygiene.py --clean      # 掃描 + 把「本機垃圾」移到廢紙簍
-    python scripts/repo_hygiene.py --json       # 機器可讀輸出
-    python scripts/repo_hygiene.py --strict     # 發現任何可清理項就 exit 1
+    python scripts/repo_hygiene.py              # 扫描并出报告（只读，不改任何东西）
+    python scripts/repo_hygiene.py --clean      # 扫描 + 把「本机垃圾」移到废纸篓
+    python scripts/repo_hygiene.py --json       # 机器可读输出
+    python scripts/repo_hygiene.py --strict     # 发现任何可清理项就 exit 1
 
-設計約定（沿用本倉庫的既有規範）
+设计约定（沿用本仓库的既有规范）
 --------------------------------
-- **覆蓋類只報數，不判失敗**：冗余是覆蓋率性質的慢性病，不是斷鏈那樣的硬錯誤。
-  除非加 `--strict`，否則一律 exit 0 —— 否則回歸永遠紅燈，久了沒人看。
-- **只標注、不批量刪**：`--clean` 動的只有「本機垃圾」（已在 .gitignore 裡，
-  不進倉庫，刪錯也只影響本機）。**已入庫的檔案一律只出建議、不代刪** ——
-  它們是 git 歷史的一部分，刪除要由人拍板並寫進 commit message。
-- 判據一律「**全倉可查引用**」，不是「我記得它被用過」。
+- **覆盖类只报数，不判失败**：冗余是覆盖率性质的慢性病，不是断链那样的硬错误。
+  除非加 `--strict`，否则一律 exit 0 —— 否则回归永远红灯，久了没人看。
+- **只标注、不批量删**：`--clean` 动的只有「本机垃圾」（已在 .gitignore 里，
+  不进仓库，删错也只影响本机）。**已入库的文件一律只出建议、不代删** ——
+  它们是 git 历史的一部分，删除要由人拍板并写进 commit message。
+- 判据一律「**全仓可查引用**」，不是「我记得它被用过」。
 """
 
 import argparse
@@ -46,26 +46,26 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 
-# 掃描期間的「不致命但要知道」的事（讀不到的檔／搬檔改走備援路徑…）。
-# **不吞異常**：吞掉＝某一格從未生效卻回報全綠，那比沒有這支腳本更危險。
+# 扫描期间的「不致命但要知道」的事（读不到的档／搬档改走备援路径…）。
+# **不吞异常**：吞掉＝某一格从未生效却回报全绿，那比没有这支脚本更危险。
 WARNINGS = []
 
-# ── 掃描範圍 ────────────────────────────────────────────────────────────────
-# 這些目錄不掃：.git 是版本歷史；.workbuddy 是私有筆記；優化輪次是過程記錄
+# ── 扫描范围 ────────────────────────────────────────────────────────────────
+# 这些目录不扫：.git 是版本历史；.workbuddy 是私有笔记；优化记录是过程记录
 SKIP_DIRS = {".git", ".workbuddy", "优化记录", "__pycache__", "node_modules"}
 TEXT_EXT = {".md", ".py", ".json", ".sh", ".txt", ".html", ".yml", ".yaml", ".csv"}
 
-# ── 入口檔：一定是「被引用」的角色，不查入鏈 ─────────────────────────────────
+# ── 入口档：一定是「被引用」的角色，不查入链 ─────────────────────────────────
 ENTRY_FILES = {"SKILL.md", "AGENTS.md", "README.md", "", "LICENSE"}
 
-# ── 派生物：可由源檔＋腳本再生 ──────────────────────────────────────────────
+# ── 派生物：可由源档＋脚本再生 ──────────────────────────────────────────────
 DERIVED_EXT = {".docx": ".md", ".pdf": ".md", ".xlsx": ".md"}
-# 這些派生物有「人要看成品長什麼樣」的正當用途，不列為冗余（但仍會報陳舊）
+# 这些派生物有「人要看成品长什么样」的正当用途，不列为冗余（但仍会报陈旧）
 DERIVED_KEEP_HINT = ()
 
-# ── 本機垃圾：已被 .gitignore 排除，刪了不影響倉庫 ────────────────────────────
+# ── 本机垃圾：已被 .gitignore 排除，删了不影响仓库 ────────────────────────────
 JUNK_NAMES = {".DS_Store", "Thumbs.db", "Desktop.ini"}
-JUNK_DIR_PAT = re.compile(r"^(?:實測-|实测-|output$|\.archive$)")
+JUNK_DIR_PAT = re.compile(r"^(?:实测-|实测-|output$|\.archive$)")
 JUNK_EXT = {".pyc", ".pyo", ".swp", ".bak"}
 
 
@@ -95,7 +95,7 @@ def read_text(rel):
 
 
 def build_corpus(files):
-    """全倉文本語料，用於判斷「這個檔名有沒有被任何地方提到」"""
+    """全仓文本语料，用于判断「这个文件名有没有被任何地方提到」"""
     texts = {}
     for rel in files:
         if os.path.splitext(rel)[1].lower() in TEXT_EXT:
@@ -104,10 +104,10 @@ def build_corpus(files):
 
 
 def find_orphans(files, texts):
-    """孤兒檔：basename 與 stem 在全倉（扣除自身）都不出現
+    """孤儿档：basename 与 stem 在全仓（扣除自身）都不出现
 
-    刻意**排除本機垃圾**（.DS_Store／實測-*／__pycache__）：它們零引用是理所當然的，
-    報在 ③ 就好 —— 同一件事報兩次會讓報告失真，久了沒人看。
+    刻意**排除本机垃圾**（.DS_Store／实测-*／__pycache__）：它们零引用是理所当然的，
+    报在 ③ 就好 —— 同一件事报两次会让报告失真，久了没人看。
     """
     orphans = []
     for rel in files:
@@ -119,7 +119,7 @@ def find_orphans(files, texts):
         stem = os.path.splitext(base)[0]
         if base in ENTRY_FILES:
             continue
-        # 只看「本體檔」——子目錄的 README/索引不算孤兒候選（它們是目錄入口）
+        # 只看「本体档」——子目录的 README/索引不算孤儿候选（它们是目录入口）
         if base.lower() == "readme.md":
             continue
         hits = 0
@@ -133,9 +133,9 @@ def find_orphans(files, texts):
 
 
 def find_derived(files):
-    """派生物：同目錄存在同名源檔 → 可再生；並檢查時序（派生物早於源＝陳舊）
+    """派生物：同目录存在同名源档 → 可再生；并检查时序（派生物早于源＝陈旧）
 
-    同樣排除本機垃圾：`實測-*/` 裡的 .docx 本來就不入庫，報在 ③ 即可。
+    同样排除本机垃圾：`实测-*/` 里的 .docx 本来就不入库，报在 ③ 即可。
     """
     out = []
     for rel in files:
@@ -146,7 +146,7 @@ def find_derived(files):
             continue
         src = os.path.splitext(rel)[0] + DERIVED_EXT[ext]
         if not os.path.exists(src):
-            continue                      # 找不到源 → 不是「可再生」，是唯一資產，不動
+            continue                      # 找不到源 → 不是「可再生」，是唯一资产，不动
         d_mtime = os.path.getmtime(rel)
         s_mtime = os.path.getmtime(src)
         out.append({
@@ -160,16 +160,16 @@ def find_derived(files):
 
 
 def _junk_why(rel):
-    """回傳『這是什麼垃圾』，不是垃圾則回 None。find_junk 與 find_orphans 共用同一判據 ——
-    兩處各寫一份，早晚會漂移。"""
+    """回传『这是什么垃圾』，不是垃圾则回 None。find_junk 与 find_orphans 共用同一判据 ——
+    两处各写一份，早晚会漂移。"""
     parts = rel.split(os.sep)
     if any(JUNK_DIR_PAT.match(p) for p in parts):
-        return "本機測試產物目錄"
+        return "本机测试产物目录"
     base = os.path.basename(rel)
     if base in JUNK_NAMES:
-        return "系統／編輯器垃圾"
+        return "系统／编辑器垃圾"
     if os.path.splitext(base)[1].lower() in JUNK_EXT:
-        return "編譯／備份殘留"
+        return "编译／备份残留"
     return None
 
 
@@ -178,7 +178,7 @@ def _is_junk(rel):
 
 
 def find_junk(files):
-    """本機垃圾：.gitignore 已排除者；刪了不影響公開倉庫"""
+    """本机垃圾：.gitignore 已排除者；删了不影响公开仓库"""
     out = []
     for rel in files:
         why = _junk_why(rel)
@@ -188,30 +188,30 @@ def find_junk(files):
 
 
 def find_dupes(files):
-    """內容完全相同（sha256）——同一份知識抄兩遍是最貴的冗余"""
+    """内容完全相同（sha256）——同一份知识抄两遍是最贵的冗余"""
     groups = {}
     for rel in files:
         try:
             with open(rel, "rb") as f:
                 h = hashlib.sha256(f.read()).hexdigest()
         except OSError as e:
-            # **不吞**：讀不到的檔要說出來。吞掉的話，這個檔就等於「永遠不參與查重」，
-            # 而報告看起來完全正常 —— 那是「這關從未生效但回報全綠」的經典形態。
-            WARNINGS.append(f"查重時讀不到 {rel}：{e}")
+            # **不吞**：读不到的档要说出来。吞掉的话，这个文件就等于「永远不参与查重」，
+            # 而报告看起来完全正常 —— 那是「这关从未生效但回报全绿」的经典形态。
+            WARNINGS.append(f"查重时读不到 {rel}：{e}")
             continue
         groups.setdefault(h, []).append(rel)
     return [v for v in groups.values() if len(v) > 1]
 
 
-# ── 清理動作 ────────────────────────────────────────────────────────────────
+# ── 清理动作 ────────────────────────────────────────────────────────────────
 def _trash_dir():
     return os.path.expanduser("~/.Trash")
 
 
 def to_trash(rel):
-    """移到 macOS 廢紙簍。優先 `trash` CLI → osascript → 直接搬進 ~/.Trash。
+    """移到 macOS 废纸篓。优先 `trash` CLI → osascript → 直接搬进 ~/.Trash。
 
-    刻意不用 `rm`：這三條路徑都讓檔案可在 Finder 廢紙簍裡還原。
+    刻意不用 `rm`：这三条路径都让文件可在 Finder 废纸篓里还原。
     """
     abspath = os.path.abspath(rel)
     if not os.path.exists(abspath):
@@ -223,7 +223,7 @@ def to_trash(rel):
         if p.returncode == 0:
             return True, "trash CLI"
 
-    # ② Finder（有逾時，避免權限對話框卡死）
+    # ② Finder（有逾时，避免权限对话框卡死）
     if sys.platform == "darwin" and shutil.which("osascript"):
         script = f'tell application "Finder" to delete POSIX file "{abspath}"'
         try:
@@ -232,11 +232,11 @@ def to_trash(rel):
             if p.returncode == 0:
                 return True, "Finder"
         except subprocess.TimeoutExpired:
-            # 不吞：Finder 那條路走不通（多半是自動化權限對話框沒人點），
-            # 但要讓人知道「這次是走第 ③ 條路搬的」，而不是以為 Finder 成功了。
-            WARNINGS.append(f"Finder 搬檔逾時，改走 ~/.Trash：{os.path.basename(abspath)}")
+            # 不吞：Finder 那条路走不通（多半是自动化权限对话框没人点），
+            # 但要让人知道「这次是走第 ③ 条路搬的」，而不是以为 Finder 成功了。
+            WARNINGS.append(f"Finder 搬档逾时，改走 ~/.Trash：{os.path.basename(abspath)}")
 
-    # ③ 直接搬進 ~/.Trash（加時間戳避免撞名）
+    # ③ 直接搬进 ~/.Trash（加时间戳避免撞名）
     td = _trash_dir()
     if os.path.isdir(td):
         name = f"{os.path.basename(abspath)}.{time.strftime('%Y%m%d-%H%M%S')}"
@@ -245,16 +245,16 @@ def to_trash(rel):
             return True, "~/.Trash"
         except OSError as e:
             return False, str(e)
-    return False, "找不到廢紙簍"
+    return False, "找不到废纸篓"
 
 
 def clean_junk(junk):
     done, failed = [], []
-    # 先檔案後目錄：目錄空了再收
+    # 先文件后目录：目录空了再收
     for item in sorted(junk, key=lambda d: -len(d["path"].split(os.sep))):
         ok, how = to_trash(item["path"])
         (done if ok else failed).append((item["path"], how))
-    # 收掉空目錄
+    # 收掉空目录
     for dirpath, dirnames, filenames in os.walk(".", topdown=False):
         rel = os.path.relpath(dirpath, ".")
         if rel == "." or is_skipped(rel):
@@ -265,7 +265,7 @@ def clean_junk(junk):
     return done, failed
 
 
-# ── 輸出 ────────────────────────────────────────────────────────────────────
+# ── 输出 ────────────────────────────────────────────────────────────────────
 def human_size(n):
     if n < 1024:
         return f"{n:,.0f} B"
@@ -278,60 +278,60 @@ def report(res, verbose=True):
     orphans, derived, junk, dupes = res["orphans"], res["derived"], res["junk"], res["dupes"]
 
     print("=" * 72)
-    print("倉庫冗余／衛生掃描 · repo_hygiene.py")
-    print("（既有校驗腳本查『內容對不對』；本腳本查『這個檔案該不該存在』）")
+    print("仓库冗余／卫生扫描 · repo_hygiene.py")
+    print("（既有校验脚本查『内容对不对』；本脚本查『这个文件案该不该存在』）")
     print("=" * 72)
-    print(f"  掃描範圍：{res['total']} 個檔（已排除 .git／.workbuddy／優化輪次／__pycache__）")
+    print(f"  扫描范围：{res['total']} 个文件（已排除 .git／.workbuddy／优化记录／__pycache__）")
 
-    print(f"\n① 孤兒檔（全倉零入鏈引用）：{len(orphans)} 個，"
+    print(f"\n① 孤儿档（全仓零入链引用）：{len(orphans)} 个，"
           f"{human_size(sum(o['size'] for o in orphans))}")
     for o in orphans:
         print(f"     {human_size(o['size']):>10}  {o['path']}")
     if not orphans:
-        print("     （無）")
+        print("     （无）")
 
-    print(f"\n② 派生物（可由源檔＋腳本再生）：{len(derived)} 個，"
+    print(f"\n② 派生物（可由源档＋脚本再生）：{len(derived)} 个，"
           f"{human_size(sum(d['size'] for d in derived))}")
     for d in derived:
-        tag = f"⚠️  陳舊：比源檔晚於 {d['lag_hours']} h" if d["stale"] else "與源檔同步"
+        tag = f"⚠️  陈旧：比源档晚于 {d['lag_hours']} h" if d["stale"] else "与源档同步"
         print(f"     {human_size(d['size']):>10}  {d['path']}")
         print(f"                   源：{d['source']}（{tag}）")
     if not derived:
-        print("     （無）")
+        print("     （无）")
 
-    print(f"\n③ 本機垃圾（.gitignore 已排除，不進倉庫）：{len(junk)} 個，"
+    print(f"\n③ 本机垃圾（.gitignore 已排除，不进仓库）：{len(junk)} 个，"
           f"{human_size(sum(j['size'] for j in junk))}")
     for j in junk:
         print(f"     {human_size(j['size']):>10}  {j['path']}   ← {j['why']}")
     if not junk:
-        print("     （無）")
+        print("     （无）")
 
-    print(f"\n④ 內容完全重複：{len(dupes)} 組")
+    print(f"\n④ 内容完全重复：{len(dupes)} 组")
     for g in dupes:
         print("     " + " ＝ ".join(g))
     if not dupes:
-        print("     （無）")
+        print("     （无）")
 
     total_waste = sum(o["size"] for o in orphans) + sum(d["size"] for d in derived) \
         + sum(j["size"] for j in junk)
     print("\n" + "-" * 72)
-    print(f"  可清理總量：{human_size(total_waste)}"
-          f"（孤兒 {human_size(sum(o['size'] for o in orphans))} ＋ "
+    print(f"  可清理总量：{human_size(total_waste)}"
+          f"（孤儿 {human_size(sum(o['size'] for o in orphans))} ＋ "
           f"派生 {human_size(sum(d['size'] for d in derived))} ＋ "
           f"垃圾 {human_size(sum(j['size'] for j in junk))}）")
-    print("  ⚠️  ①② 已入庫，本腳本**只出建議不代刪** —— 刪除要人拍板並寫進 commit message。")
-    print("     ③ 為本機檔案，`--clean` 可直接移入廢紙簍（不影響倉庫）。")
+    print("  ⚠️  ①② 已入库，本脚本**只出建议不代删** —— 删除要人拍板并写进 commit message。")
+    print("     ③ 为本机文件，`--clean` 可直接移入废纸篓（不影响仓库）。")
     if WARNINGS:
-        print(f"\n  ⚠️  掃描期間 {len(WARNINGS)} 條提示（不影響上面的結論，但要知道）：")
+        print(f"\n  ⚠️  扫描期间 {len(WARNINGS)} 条提示（不影响上面的结论，但要知道）：")
         for w in WARNINGS:
             print(f"     · {w}")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="倉庫冗余／衛生掃描")
-    ap.add_argument("--clean", action="store_true", help="把『本機垃圾』移入廢紙簍")
-    ap.add_argument("--json", action="store_true", help="機器可讀輸出")
-    ap.add_argument("--strict", action="store_true", help="發現任何可清理項即 exit 1")
+    ap = argparse.ArgumentParser(description="仓库冗余／卫生扫描")
+    ap.add_argument("--clean", action="store_true", help="把『本机垃圾』移入废纸篓")
+    ap.add_argument("--json", action="store_true", help="机器可读输出")
+    ap.add_argument("--strict", action="store_true", help="发现任何可清理项即 exit 1")
     args = ap.parse_args()
 
     files = walk_files()
@@ -350,11 +350,11 @@ def main():
             res["cleaned"] = [{"path": p, "via": h} for p, h in done]
             res["clean_failed"] = [{"path": p, "why": h} for p, h in failed]
         else:
-            print(f"✅ 已移入廢紙簍（可用 Finder『放回原處』還原）：{len(done)} 項\n")
+            print(f"✅ 已移入废纸篓（可用 Finder『放回原处』还原）：{len(done)} 项\n")
             for p, how in done:
-                print(f"   → {p}   （經 {how}）")
+                print(f"   → {p}   （经 {how}）")
             if failed:
-                print(f"\n❌ 失敗 {len(failed)} 項：")
+                print(f"\n❌ 失败 {len(failed)} 项：")
                 for p, why in failed:
                     print(f"   ✗ {p}   {why}")
 
@@ -369,18 +369,18 @@ def main():
 
 
 if __name__ == "__main__":
-    # 協議 8：腳本掛了要**降級、別卡死**。裸 traceback 會讓執行 AI 停在原地，
-    # 而這支腳本的所有結論都只是「建議」性質 —— 沒必要為它中斷整條流程。
+    # 协议 8：脚本挂了要**降级、别卡死**。裸 traceback 会让执行 AI 停在原地，
+    # 而这支脚本的所有结论都只是「建议」性质 —— 没必要为它中断整条流程。
     try:
         main()
     except KeyboardInterrupt:
-        print("\n⚠️  已中斷（未完成）—— 掃描是只讀的，倉庫未受影響。", file=sys.stderr)
+        print("\n⚠️  已中断（未完成）—— 扫描是只读的，仓库未受影响。", file=sys.stderr)
         sys.exit(130)
     except Exception as e:                                    # noqa: BLE001
-        print(f"❌ repo_hygiene 出錯：{type(e).__name__}: {e}", file=sys.stderr)
-        print("   這是只讀掃描，失敗不影響倉庫。可先手動檢查："
-              "\n   · 檔案權限／磁碟（掃描要讀全倉）"
-              "\n   · 是否在倉庫根目錄執行（本腳本會自行切到倉庫根）"
-              "\n   · 若只是清理卡住，改用系統 Finder 手動刪 .DS_Store / 实测-* 即可。",
+        print(f"❌ repo_hygiene 出错：{type(e).__name__}: {e}", file=sys.stderr)
+        print("   这是只读扫描，失败不影响仓库。可先手动检查："
+              "\n   · 文件权限／磁盘（扫描要读全仓）"
+              "\n   · 是否在仓库根目录执行（本脚本会自行切到仓库根）"
+              "\n   · 若只是清理卡住，改用系统 Finder 手动删 .DS_Store / 实测-* 即可。",
               file=sys.stderr)
         sys.exit(2)

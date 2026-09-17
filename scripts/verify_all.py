@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-全鏈路驗證器 · verify_all.py（含 50 遍冪等壓測）
+全链路验证器 · verify_all.py（含 50 遍幂等压测）
 
-為什麼有它（2026-09-17，用戶指令「把所有东西都验证了，整条链路每一个步骤都验证了，自检50遍」）：
-    `kb_audit.py` 查的是**知識庫連通性**；本腳本查的是**整條流水線本身**：
-    每一支腳本的介面、每一次執行的確定性、以及端到端的真實出稿。
+为什么有它（2026-09-17，用户指令「把所有东西都验证了，整条链路每一个步骤都验证了，自检50遍」）：
+    `kb_audit.py` 查的是**知识库连通性**；本脚本查的是**整条流水线本身**：
+    每一支脚本的接口、每一次执行的确定性、以及端到端的真实出稿。
 
-    其中「50 遍」不是形式主義 —— 它專抓一類**極隱蔽的 bug：非冪等**。
-    實測已抓到過兩支：
-      · `case_play_index.py` 第一版「下一行已有標就跳過」→ 舊標文字永不更新
-      · `composer.parse_cards` 第一版只認 2 種清單寫法 → 29/32/33/51 靜默回 0 張卡
-    非冪等的症狀是「每次跑都有一點點不一樣」，單跑一次看不出來，跑 50 次就現形。
+    其中「50 遍」不是形式主义 —— 它专抓一类**极隐蔽的 bug：非幂等**。
+    实测已抓到过两支：
+      · `case_play_index.py` 第一版「下一行已有标就跳过」→ 旧标文字永不更新
+      · `composer.parse_cards` 第一版只认 2 种清单写法 → 29/32/33/51 静默回 0 张卡
+    非幂等的症状是「每次跑都有一点点不一样」，单跑一次看不出来，跑 50 次就现形。
 
-做什麼（五段）：
-    A 介面：每支腳本 `--help` 都能跑（不是 500、不是參數名寫錯）
-    B 冪等 ×N：把所有 `--fix` 型腳本按順序跑 N 輪。
-       判據＝**第 1 輪之後，每一輪跑完倉庫內容哈希必須不變**（輸入不變→輸出必須不變）
-    C 只讀 ×N：只讀型校驗腳本跑 N 輪，輸出必須逐字一致、退出碼一致
+做什么（五段）：
+    A 接口：每支脚本 `--help` 都能跑（不是 500、不是参数名写错）
+    B 幂等 ×N：把所有 `--fix` 型脚本按顺序跑 N 轮。
+       判据＝**第 1 轮之后，每一轮跑完仓库内容哈希必须不变**（输入不变→输出必须不变）
+    C 只读 ×N：只读型校验脚本跑 N 轮，输出必须逐字一致、退出码一致
     D 端到端：gate → budget → role_check → composer → selfcheck → depth_check → build_docx
-       **真的產出一份 .docx**（寫到 /tmp，不污染倉庫）
-    E 連通性：呼叫 `kb_audit.py` 的 7 條鏈路
+       **真的产出一份 .docx**（写到 /tmp，不污染仓库）
+    E 连通性：呼叫 `kb_audit.py` 的 7 条链路
 
 用法：
-    python scripts/verify_all.py              # 預設 50 遍
-    python scripts/verify_all.py -n 5         # 快速（改腳本時用）
+    python scripts/verify_all.py              # 预设 50 遍
+    python scripts/verify_all.py -n 5         # 快速（改脚本时用）
     python scripts/verify_all.py --quiet
-退出碼：0 = 全部通過；1 = 有失敗項；2 = 腳本出錯
+退出码：0 = 全部通过；1 = 有失败项；2 = 脚本出错
 """
 
 import argparse
@@ -45,20 +45,20 @@ SKIP_DIR = ("/.git/", "/.workbuddy/", "/__pycache__/")
 TMP = os.path.join(tempfile.gettempdir(), "verify_all")
 SAMPLE = os.path.join(ROOT, "references", "范例")
 
-# 會寫檔的腳本（順序＝依賴順序）
+# 会写档的脚本（顺序＝依赖顺序）
 FIXERS = [
     ("case_gap_fill.py", ["--fix", "--quiet"]),
     ("case_sections.py", ["--fix", "--quiet"]),
     ("case_order.py", ["--fix"]),
     ("case_play_index.py", ["--fix"]),
     ("file_meta.py", ["--fix", "--quiet"]),
-    # 交付稿結構表由 paradigm_data 生成並寫回 README —— 掛在冪等壓測裡，
-    # 改骨架忘了更新 README 會被第 2 輪的哈希漂移直接抓出來。
+    # 交付稿结构表由 paradigm_data 生成并写回 README —— 挂在幂等压测里，
+    # 改骨架忘了更新 README 会被第 2 轮的哈希漂移直接抓出来。
     ("build_paradigm.py", ["--doc-map", "README.md"]),
     #  同理：改架构忘了更新它，第二轮的哈希漂移会直接抓出来。
     ("", []),
 ]
-# 只讀型（每次輸出必須一致）
+# 只读型（每次输出必须一致）
 READERS = [
     ("case_upgrade.py", []),
     ("case_lint.py", []),
@@ -75,7 +75,7 @@ _SKIPPED: list = []
 
 
 def repo_hash():
-    """倉庫內容哈希（排除 .git/.workbuddy/__pycache__）—— 用來偵測「跑一輪有沒有改動東西」"""
+    """仓库内容哈希（排除 .git/.workbuddy/__pycache__）—— 用来侦测「跑一轮有没有改动东西」"""
     h = hashlib.sha256()
     for dirpath, dirnames, filenames in os.walk(ROOT):
         if any(s.strip("/") in dirpath for s in SKIP_DIR):
@@ -98,10 +98,10 @@ def repo_hash():
 
 
 def stage_a(quiet):
-    """A 介面：每支腳本 --help 都能跑"""
+    """A 接口：每支脚本 --help 都能跑"""
     bad = []
-    # 只測「有 CLI 入口」的腳本：純資料／純函式庫模組（沒有 __main__）不該被當成工具測 ——
-    # 對它跑 --help 只會安靜地 import 一遍就退出 0，看起來「通過」其實什麼都沒驗到。
+    # 只测「有 CLI 入口」的脚本：纯资料／纯函数库模块（没有 __main__）不该被当成工具测 ——
+    # 对它跑 --help 只会安静地 import 一遍就退出 0，看起来「通过」其实什么都没验到。
     scripts = []
     for f in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
         try:
@@ -113,7 +113,7 @@ def stage_a(quiet):
         scripts.append(f)
     for s in scripts:
         rc, out = sh([PY, os.path.join(HERE, s), "--help"], timeout=60)
-        # argparse 正常回 0；有些腳本沒有 --help 會回 2 —— 只要不是 traceback 就算介面可用
+        # argparse 正常回 0；有些脚本没有 --help 会回 2 —— 只要不是 traceback 就算接口可用
         # ⚠️ 2026-09-17 实测漏检：原先只认 "Traceback"，而 **SyntaxError /
         #    IndentationError 这类解析期错误根本不打印 traceback** ——
         #    case_relabel.py 因此带病通过了不知多少轮 A 关（它其实一行都跑不起来）。
@@ -124,20 +124,20 @@ def stage_a(quiet):
         if _ERR.search(out):
             bad.append((s, out.strip().split("\n")[-1][:90]))
     if not quiet:
-        print(f"  A 介面：{len(scripts)} 支腳本 --help，異常 {len(bad)}")
+        print(f"  A 接口：{len(scripts)} 支脚本 --help，异常 {len(bad)}")
         for s, e in bad:
             print(f"     ✗ {s}：{e}")
     return len(bad), len(scripts)
 
 
 def stage_b(n, quiet, h_mid=None):
-    """B 冪等：跑 n 輪，第 1 輪之後每輪倉庫哈希必須不變"""
+    """B 幂等：跑 n 轮，第 1 轮之后每轮仓库哈希必须不变"""
     drifts = []
     base = None
     for it in range(1, n + 1):
         for s, args in FIXERS:
             rc, out = sh([PY, os.path.join(HERE, s)] + args)
-            if rc not in (0, 1):        # 1 = 體檢模式；修復腳本正常回 0
+            if rc not in (0, 1):        # 1 = 体检模式；修复脚本正常回 0
                 drifts.append((it, s, f"rc={rc} {out.strip().splitlines()[-1][:80] if out.strip() else ''}"))
         h = repo_hash()
         if base is None:
@@ -145,19 +145,19 @@ def stage_b(n, quiet, h_mid=None):
             if h_mid is not None:
                 h_mid[0] = h
             if not quiet:
-                print(f"  B 冪等：第 1 輪基準哈希 {h[:12]}…（這一輪允許改動檔案）")
+                print(f"  B 幂等：第 1 轮基准哈希 {h[:12]}…（这一轮允许改动文件）")
         elif h != base:
-            drifts.append((it, "（整輪）", f"倉庫哈希漂移 {base[:8]}→{h[:8]}"))
+            drifts.append((it, "（整轮）", f"仓库哈希漂移 {base[:8]}→{h[:8]}"))
             base = h
     if not quiet:
-        print(f"  B 冪等 ×{n}：{'✅ 第 2 輪起零漂移' if not drifts else f'❌ {len(drifts)} 次漂移/異常'}")
+        print(f"  B 幂等 ×{n}：{'✅ 第 2 轮起零漂移' if not drifts else f'❌ {len(drifts)} 次漂移/异常'}")
         for it, s, e in drifts[:10]:
-            print(f"     ✗ 第 {it} 輪 {s}：{e}")
+            print(f"     ✗ 第 {it} 轮 {s}：{e}")
     return len(drifts), n
 
 
 def stage_c(n, quiet):
-    """C 只讀：跑 n 輪，輸出必須逐字一致"""
+    """C 只读：跑 n 轮，输出必须逐字一致"""
     base, bad = {}, []
     for it in range(1, n + 1):
         for s, args in READERS:
@@ -167,16 +167,16 @@ def stage_c(n, quiet):
             if key not in base:
                 base[key] = sig
             elif base[key] != sig:
-                bad.append((it, s, f"輸出/退出碼變了 rc {base[key][0]}→{rc}"))
+                bad.append((it, s, f"输出/退出码变了 rc {base[key][0]}→{rc}"))
     if not quiet:
-        print(f"  C 只讀 ×{n}：{len(READERS)} 支腳本，{'✅ 輸出逐字一致' if not bad else f'❌ {len(bad)} 次不一致'}")
+        print(f"  C 只读 ×{n}：{len(READERS)} 支脚本，{'✅ 输出逐字一致' if not bad else f'❌ {len(bad)} 次不一致'}")
         for it, s, e in bad[:10]:
-            print(f"     ✗ 第 {it} 輪 {s}：{e}")
+            print(f"     ✗ 第 {it} 轮 {s}：{e}")
     return len(bad), len(READERS)
 
 
 def stage_d(quiet):
-    """D 端到端：真的走完唯一出稿鏈，產出一份 .docx"""
+    """D 端到端：真的走完唯一出稿链，产出一份 .docx"""
     os.makedirs(TMP, exist_ok=True)
     rules = os.path.join(SAMPLE, "便利店开学季战役-任务规则表.json")
     budget = os.path.join(SAMPLE, "便利店开学季战役-预算表.json")
@@ -187,23 +187,23 @@ def stage_d(quiet):
     steps, bad = [], []
     missing = [p for p in (rules, budget, roles, plan) if not os.path.exists(p)]
     if missing:
-        return len(missing), 5, [("範例檔缺失", m) for m in missing]
+        return len(missing), 5, [("范例档缺失", m) for m in missing]
 
     for name, args, allow in [
-        # ⚠️ 實測修正：gate_check／role_check 收的是**位置參數**，不是 --rules／--roles
+        # ⚠️ 实测修正：gate_check／role_check 收的是**位置参数**，不是 --rules／--roles
         ("gate_check.py", [rules], (0,)),
         ("role_check.py", [roles], (0,)),
         ("budget_check.py", [budget], (0,)),
         ("composer.py", ["--rules", rules, "--out", skel, "--tier", "标准"], (0,)),
         ("selfcheck.py", [plan], (0,)),
-        ("depth_check.py", [plan], (0, 1)),      # 只診斷不阻攔
+        ("depth_check.py", [plan], (0, 1)),      # 只诊断不阻拦
     ]:
         rc, out = sh([PY, os.path.join(HERE, name)] + args)
         steps.append((name, rc))
         if rc not in allow:
             bad.append((name, f"rc={rc}｜{(out.strip().splitlines() or [''])[-1][:90]}"))
     # 出稿
-    # build_docx 會先跑 selfcheck；範例交付稿沒有《任務規則表》標記 → 必須顯式給 --rules
+    # build_docx 会先跑 selfcheck；范例交付稿没有《任务规则表》标记 → 必须显式给 --rules
     rc, out = sh([PY, os.path.join(HERE, "build_docx.py"), plan, "-o", docx,
                   "--title", "验证用方案", "--date", "2026-09-17",
                   "--rules", rules], timeout=300)
@@ -211,19 +211,19 @@ def stage_d(quiet):
     if rc != 0 or not os.path.exists(docx):
         bad.append(("build_docx.py", f"rc={rc}｜{(out.strip().splitlines() or [''])[-1][:90]}"))
     elif os.path.getsize(docx) < 5000:
-        bad.append(("build_docx.py", f"產出過小 {os.path.getsize(docx)} bytes"))
-    # run_pipeline 也走一遍（唯一入口，任一關不過就中止 → 這裡預期「非 0 且說明清楚」）
+        bad.append(("build_docx.py", f"产出过小 {os.path.getsize(docx)} bytes"))
+    # run_pipeline 也走一遍（唯一入口，任一关不过就中止 → 这里预期「非 0 且说明清楚」）
     rc, out = sh([PY, os.path.join(HERE, "run_pipeline.py"), "--rules", rules,
                   "--roles", roles, "--budget", budget, "--plan", plan,
                   "-o", os.path.join(TMP, "pipeline.docx")], timeout=300)
     steps.append(("run_pipeline.py", rc))
     ok_pipeline = os.path.exists(os.path.join(TMP, "pipeline.docx"))
     if not ok_pipeline:
-        bad.append(("run_pipeline.py", f"未產出 .docx（rc={rc}）｜{out.strip().splitlines()[-1][:80]}"))
+        bad.append(("run_pipeline.py", f"未产出 .docx（rc={rc}）｜{out.strip().splitlines()[-1][:80]}"))
     if not quiet:
         print("  D 端到端：" + " → ".join(f"{n}(rc={r})" for n, r in steps))
         if os.path.exists(docx):
-            print(f"     build_docx 產出 {os.path.getsize(docx) / 1024:.0f} KB ✅"
+            print(f"     build_docx 产出 {os.path.getsize(docx) / 1024:.0f} KB ✅"
                   f"｜run_pipeline {'✅' if ok_pipeline else '❌'}")
         for n, e in bad:
             print(f"     ✗ {n}：{e}")
@@ -234,22 +234,22 @@ def stage_e(quiet):
     rc, out = sh([PY, os.path.join(HERE, "kb_audit.py"), "--quiet"])
     tail = [l for l in out.strip().split("\n") if l.strip()][-1] if out.strip() else ""
     if not quiet:
-        print(f"  E 連通性：{tail}")
+        print(f"  E 连通性：{tail}")
     return (0 if rc == 0 else 1), 1
 
 
 def stage_f(quiet):
-    """F 對賬與優化點：文檔承諾 ↔ 實際執行 ／ 每輪可優化項 ／ 倉庫冗余。
+    """F 对账与优化点：文档承诺 ↔ 实际执行 ／ 每轮可优化项 ／ 仓库冗余。
 
-    為什麼要並進同一個入口：這幾條自檢原本散在四處（`smoke_test`／`kb_audit`／
-    `promise_check`／`optimize_scan`／`repo_hygiene`／`verify_all`），**跑的人很容易只跑熟悉的那兩條**。
-    → 收成一個入口，跑一次就知道全部。
+    为什么要并进同一个入口：这几条自检原本散在四处（`smoke_test`／`kb_audit`／
+    `promise_check`／`optimize_scan`／`repo_hygiene`／`verify_all`），**跑的人很容易只跑熟悉的那两条**。
+    → 收成一个入口，跑一次就知道全部。
 
-    ⚠️ `promise_check` 判失敗（承諾沒被執行＝真問題）；
-       `optimize_scan`／`repo_hygiene` **只報數不算失敗**（它們是建議，不是門檻）。
+    ⚠️ `promise_check` 判失败（承诺没被执行＝真问题）；
+       `optimize_scan`／`repo_hygiene` **只报数不算失败**（它们是建议，不是门槛）。
 
-    ⚠️ `repo_hygiene` 在這裡**刻意不加 `--clean`**：回歸驗證不該有副作用。
-       要清理請另外手動跑 `python scripts/repo_hygiene.py --clean`。
+    ⚠️ `repo_hygiene` 在这里**刻意不加 `--clean`**：回归验证不该有副作用。
+       要清理请另外手动跑 `python scripts/repo_hygiene.py --clean`。
     """
     bad = 0
     rc1, out1 = sh([PY, os.path.join(HERE, "promise_check.py")])
@@ -263,9 +263,9 @@ def stage_f(quiet):
     rc2, out2 = sh([PY, os.path.join(HERE, "optimize_scan.py"), "-n", "10"])
     m = re.search(r"命中 (\d+) 条", out2)
     n2 = int(m.group(1)) if m else -1
-    # 倉庫冗余：孤兒 ＋ 派生物 ＋ 本機垃圾。只報數（建議性質），但會在報告裡明示，
-    # 免得「永遠沒有檔案被刪」這件事靜悄悄地累積。
-    # 用 --json 解析，不用正則刮表格 —— 刮表格的判據會隨排版漂移。
+    # 仓库冗余：孤儿 ＋ 派生物 ＋ 本机垃圾。只报数（建议性质），但会在报告里明示，
+    # 免得「永远没有文件被删」这件事静悄悄地累积。
+    # 用 --json 解析，不用正则刮表格 —— 刮表格的判据会随排版漂移。
     rc3, out3 = sh([PY, os.path.join(HERE, "repo_hygiene.py"), "--json"])
     try:
         j3 = json.loads(out3[out3.index("{"):])
@@ -275,11 +275,25 @@ def stage_f(quiet):
         w3 = f"{waste / 1024:,.1f} KB"
     except (ValueError, KeyError, TypeError):
         n3, w3 = -1, "?"
+    # 语言统一：全仓是否还有繁体字／港台用词（判据类档与护栏行由 lang_unify 自己排除）。
+    # 只报数 —— 残留是「慢慢长出来的」覆盖类问题，不是断链那种硬错误。
+    #
+    # ⚠️ 用 `--json`，**不要解析输出文案**：2026-09-18 改了一次成功提示的措辞，
+    #    这里「全仓已是简体」的判据当场失配、F 关报 -1。文案不是接口。
+    rc4, out4 = sh([PY, os.path.join(HERE, "lang_unify.py"), "--json"])
+    try:
+        j4 = json.loads(out4[out4.index("{"):out4.rindex("}") + 1])
+        n4 = j4["changed"]
+        w4 = f"{j4['font'] + j4['vocab']:,}"
+    except (ValueError, KeyError, TypeError):
+        n4, w4 = -1, "?"
     if not quiet:
-        print(f"  F 對賬（文檔承諾↔實際執行）：{'✅' if rc1 == 0 else '✗'} {tail1}")
-        print(f"  F 優化點（建議，不算失敗）：{'✅ 0 條' if n2 == 0 else f'⚠️  {n2} 條'}")
-        print(f"  F 倉庫冗余（建議，不算失敗）：{'✅ 無' if n3 == 0 else f'⚠️  {n3} 項 / {w3}'}"
+        print(f"  F 对账（文档承诺↔实际执行）：{'✅' if rc1 == 0 else '✗'} {tail1}")
+        print(f"  F 优化点（建议，不算失败）：{'✅ 0 条' if n2 == 0 else f'⚠️  {n2} 条'}")
+        print(f"  F 仓库冗余（建议，不算失败）：{'✅ 无' if n3 == 0 else f'⚠️  {n3} 项 / {w3}'}"
               f"（清理：`python scripts/repo_hygiene.py --clean`）")
+        print(f"  F 语言统一（建议，不算失败）：{'✅ 全仓简体＋内地用词' if n4 == 0 else f'⚠️  {n4} 个文件 / {w4} 处'}"
+              f"（清理：`python scripts/lang_unify.py --fix`）")
     return bad, 2
 
 
@@ -292,33 +306,33 @@ def main():
 
     h0 = repo_hash()
     print("=" * 70)
-    print(f"全鏈路驗證 · verify_all.py（冪等壓測 {a.rounds} 遍）")
-    print(f"起點倉庫哈希 {h0[:16]}…")
+    print(f"全链路验证 · verify_all.py（幂等压测 {a.rounds} 遍）")
+    print(f"起点仓库哈希 {h0[:16]}…")
     print("=" * 70)
 
     h_mid = [None]
     r = []
-    r.append(("A 介面可跑", *stage_a(q)))
-    r.append((f"B 冪等 ×{a.rounds}", *stage_b(a.rounds, q, h_mid)))
-    r.append((f"C 只讀 ×{a.rounds}", *stage_c(a.rounds, q)))
+    r.append(("A 接口可跑", *stage_a(q)))
+    r.append((f"B 幂等 ×{a.rounds}", *stage_b(a.rounds, q, h_mid)))
+    r.append((f"C 只读 ×{a.rounds}", *stage_c(a.rounds, q)))
     r.append(("D 端到端出稿", *stage_d(q)))
-    r.append(("E 連通性 7 鏈路", *stage_e(q)))
-    r.append(("F 對賬與優化點", *stage_f(q)))
+    r.append(("E 连通性 7 链路", *stage_e(q)))
+    r.append(("F 对账与优化点", *stage_f(q)))
 
     h1 = repo_hash()
     if h_mid[0] is not None:
-        h0 = h_mid[0]          # 基線＝B 第一輪之後（第一輪本來就允許寫入）
+        h0 = h_mid[0]          # 基线＝B 第一轮之后（第一轮本来就允许写入）
     print("-" * 70)
     total = 0
     for name, bad, tot in r:
         total += bad
-        print(f"  {'✅' if bad == 0 else '✗'} {name}：{bad}（基數 {tot}）")
-    print(f"  倉庫哈希 {'未變 ✅' if h0 == h1 else '變了 ✗'}（{h0[:12]}… → {h1[:12]}…）")
+        print(f"  {'✅' if bad == 0 else '✗'} {name}：{bad}（基数 {tot}）")
+    print(f"  仓库哈希 {'未变 ✅' if h0 == h1 else '变了 ✗'}（{h0[:12]}… → {h1[:12]}…）")
     print("-" * 70)
     if total == 0 and h0 == h1:
-        print(f"✅ 全鏈路通過，且 {a.rounds} 遍壓測後倉庫零漂移")
+        print(f"✅ 全链路通过，且 {a.rounds} 遍压测后仓库零漂移")
     else:
-        print(f"⚠️ {total} 個失敗項" + ("" if h0 == h1 else "；且倉庫在驗證過程中被改動"))
+        print(f"⚠️ {total} 个失败项" + ("" if h0 == h1 else "；且仓库在验证过程中被改动"))
     sys.exit(0 if (total == 0 and h0 == h1) else 1)
 
 
@@ -326,5 +340,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ 執行出錯：{type(e).__name__}: {e}")
+        print(f"❌ 执行出错：{type(e).__name__}: {e}")
         sys.exit(2)

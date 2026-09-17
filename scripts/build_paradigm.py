@@ -33,13 +33,13 @@ import paradigm_data as P  # noqa: E402
 REF = os.path.join(ROOT, "references")
 OUT = os.path.join(REF, "12-范式库.md")
 
-# 校验用的一個「中性」規則表 —— 只為產出骨架，不影響任何匹配結果
+# 校验用的一个「中性」规则表 —— 只为产出骨架，不影响任何匹配结果
 DUMMY_RULES = {
     "client": "（示例）客户",
     "gate": {
-        "賣什麼": "（示例）用于校验骨架结构的占位内容，不参与任何真实匹配。",
-        "賣給誰": "（示例）同上，仅为让 gate 非空以避免匹配退化。",
-        "現在規模": "（示例）同上，仅为让 gate 非空以避免匹配退化。",
+        "卖什么": "（示例）用于校验骨架结构的占位内容，不参与任何真实匹配。",
+        "卖给谁": "（示例）同上，仅为让 gate 非空以避免匹配退化。",
+        "现在规模": "（示例）同上，仅为让 gate 非空以避免匹配退化。",
     },
 }
 
@@ -53,7 +53,7 @@ def heads_of(md):
             continue
         level, text = len(m.group(1)), m.group(2)
         if level == 1:
-            continue          # `# 客戶 · 营销方案` 是文档大标题，不算骨架節
+            continue          # `# 客户 · 营销方案` 是文档大标题，不算骨架节
         out.append(P.norm(text))
     return out
 
@@ -71,11 +71,11 @@ def live_skeleton(tier):
 
 
 def check(tier):
-    """回傳 (ok, 說明)。比對 composer 實際骨架與 SKELETON_HEADS。"""
+    """回传 (ok, 说明)。比对 composer 实际骨架与 SKELETON_HEADS。"""
     md, live = live_skeleton(tier)
     declared = [P.norm(h) for h in P.SKELETON_HEADS.get(tier, [])]
     if live == declared:
-        return True, f"{tier}：{len(live)} 節，一致"
+        return True, f"{tier}：{len(live)} 节，一致"
     miss = [h for h in live if h not in declared]
     extra = [h for h in declared if h not in live]
     detail = []
@@ -84,7 +84,7 @@ def check(tier):
     if extra:
         detail.append(f"paradigm_data 声明了但 composer 没有：{extra}")
     if not detail:   # 内容相同、顺序不同
-        detail.append(f"節點相同但顺序不一致。composer={live}")
+        detail.append(f"节点相同但顺序不一致。composer={live}")
     return False, f"{tier}：不一致 —— " + "；".join(detail)
 
 
@@ -126,12 +126,12 @@ def render_tier(tier):
 
 
 def preserved_head():
-    """保留既有檔頭（一級標題 ＋ 自解釋引用塊），避免每次重生都把 file_meta 的頭洗掉。
+    """保留既有文件头（一级标题 ＋ 自解释引用块），避免每次重生都把 file_meta 的头洗掉。
 
-    為什麼要這樣：本腳本會**整檔重寫**，而 `file_meta.py --fix` 會給 references/ 下的
-    每個檔插一段「這是什麼／什麼時候讀／讀完你能／目錄／規模」。若重生時不保留，
-    就會出現「跑一次 build_paradigm → 頭沒了 → 再跑 file_meta → 又有了」的來回漂移，
-    verify_all 的 50 遍冪等壓測會直接抓到（倉庫哈希變化）。
+    为什么要这样：本脚本会**整档重写**，而 `file_meta.py --fix` 会给 references/ 下的
+    每个文件插一段「这是什么／什么时候读／读完你能／目录／规模」。若重生时不保留，
+    就会出现「跑一次 build_paradigm → 头没了 → 再跑 file_meta → 又有了」的来回漂移，
+    verify_all 的 50 遍幂等压测会直接抓到（仓库哈希变化）。
     """
     if not os.path.exists(OUT):
         return None
@@ -152,7 +152,7 @@ def preserved_head():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--doc-map", default="", help="把交付稿章節結構寫進該檔的 DOCMAP 標記區塊")
+    ap.add_argument("--doc-map", default="", help="把交付稿章节结构写进该档的 DOCMAP 标记区块")
     ap.add_argument("--dry-run", action="store_true", help="只做一致性校验，不写文件")
     a = ap.parse_args()
 
@@ -223,21 +223,21 @@ def main():
 def write_doc_map(path):
     """把「交付稿实际章节结构」写进 `path` 的 <!-- DOCMAP:BEGIN --> … <!-- DOCMAP:END --> 区块。
 
-    為什麼要自動生成：README 裡那張「八篇結構表」是**手寫的**，跑了五輪優化之後
-    早就跟 composer 的實際輸出不一樣了（新增了議題樹／洞察萃取／投流／追投止損／
-    風險六件套／合同要點／授權來源／冷啟動／達人分層／總部權責…）。
-    → 手寫的結構表必然過時；**改成由腳本生成，改骨架就自動更新**（並受 50 遍冪等壓測保護）。
+    为什么要自动生成：README 里那张「八篇结构表」是**手写的**，跑了五轮优化之后
+    早就跟 composer 的实际输出不一样了（新增了议题树／洞察萃取／投流／追投止损／
+    风险六件套／合同要点／授权来源／冷启动／达人分层／总部权责…）。
+    → 手写的结构表必然过时；**改成由脚本生成，改骨架就自动更新**（并受 50 遍幂等压测保护）。
     """
     if not path or not os.path.exists(path):
-        print(f"{WARN} 找不到 {path}，跳過 --doc-map")
+        print(f"{WARN} 找不到 {path}，跳过 --doc-map")
         return
     doc = io.open(path, encoding="utf-8").read()
     B, E = "<!-- DOCMAP:BEGIN -->", "<!-- DOCMAP:END -->"
     if B not in doc or E not in doc:
-        print(f"{WARN} {path} 裡沒有 {B} / {E} 標記，跳過 --doc-map")
+        print(f"{WARN} {path} 里没有 {B} / {E} 标记，跳过 --doc-map")
         return
-    lines = ["交付稿的實際章節結構（**本區塊由 `scripts/build_paradigm.py --doc-map` 生成，"
-             "改骨架後重跑即可，不要手改**）：", "",
+    lines = ["交付稿的实际章节结构（**本区块由 `scripts/build_paradigm.py --doc-map` 生成，"
+             "改骨架后重跑即可，不要手改**）：", "",
              "| 章节 | 说明 |", "|---|---|"]
     seen = set()
     for h in P.COMMON_HEADS:
@@ -250,7 +250,7 @@ def write_doc_map(path):
     body = "\n".join(lines)
     doc = doc[:doc.index(B) + len(B)] + "\n" + body + "\n" + doc[doc.index(E):]
     io.open(path, "w", encoding="utf-8").write(doc)
-    print(f"{OK} 已更新 {path} 的交付稿結構表（{len(seen)} 節）")
+    print(f"{OK} 已更新 {path} 的交付稿结构表（{len(seen)} 节）")
 
 
 if __name__ == "__main__":
@@ -261,6 +261,6 @@ if __name__ == "__main__":
         sys.exit(130)
     except Exception as e:
         # 协议 8：脚本挂了要能降级继续，不能让执行 AI 卡在裸 traceback 上。
-        print(f"{NG} 執行出錯：{type(e).__name__}: {e}")
-        print(f"{HINT} 依協議 8：修正後重跑；環境問題就改用 Markdown 協議手工完成，不要卡在這裡。")
+        print(f"{NG} 执行出错：{type(e).__name__}: {e}")
+        print(f"{HINT} 依协议 8：修正后重跑；环境问题就改用 Markdown 协议手工完成，不要卡在这里。")
         sys.exit(2)

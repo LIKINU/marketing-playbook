@@ -3,44 +3,44 @@
 """
 案例卡 ↔ 打法 双向索引 · case_play_index.py
 
-為什麼有它（2026-09-17，用戶第五點）：
-    「這個 skills 裏面有很多東西，在交付物部分，根本就沒有體現出很多東西根本就沒有運用好」
+为什么有它（2026-09-17，用户第五点）：
+    「这个 skills 里面有很多东西，在交付物部分，根本就没有体现出很多东西根本就没有运用好」
 
-    根因（已確診，機制性的）：
-      · `composer.py` 產出的骨架裡，「可抄案例」寫的是
-        `来源 cases/01-餐饮与茶饮.md，请展开「他面对什么问题…」` —— **是占位符，不是內容**；
-      · 「理论依据」只給 `超級符號（03 §C1）` 這樣的**編號**；
-      · `knowledge_map.json` 的映射粒度**只到編號**，不注入內容。
-      → 模型拿到骨架，等於拿到一份「去哪查」的清單，而不是「已經查到」的材料。
+    根因（已确诊，机制性的）：
+      · `composer.py` 产出的骨架里，「可抄案例」写的是
+        `来源 cases/01-餐饮与茶饮.md，请展开「他面对什么问题…」` —— **是占位符，不是内容**；
+      · 「理论依据」只给 `超级符号（03 §C1）` 这样的**编号**；
+      · `knowledge_map.json` 的映射粒度**只到编号**，不注入内容。
+      → 模型拿到骨架，等于拿到一份「去哪查」的清单，而不是「已经查到」的材料。
 
-    兩頭都要接：
-      A. **案例 → 打法**（本腳本）：每張案例卡標出「這張卡可以抄哪幾條打法」，
-         索引寫進 `scripts/case_play_index.json` 供 composer 消費；
-      B. **打法 → 案例內容**（composer.py）：把卡片的「做了什麼／結果」摘要真注入骨架。
+    两头都要接：
+      A. **案例 → 打法**（本脚本）：每张案例卡标出「这张卡可以抄哪几条打法」，
+         索引写进 `scripts/case_play_index.json` 供 composer 消费；
+      B. **打法 → 案例内容**（composer.py）：把卡片的「做了什么／结果」摘要真注入骨架。
 
-映射怎麼來（不靠人編，靠既有資料反推）：
-    `00-打法库.md` 的每條打法底下有一行 `**案例**：`，
-    裡面寫着 `cases/NN-xxx.md`（品牌名…） —— 這是**人工寫過的權威映射**，
-    本腳本只做「反向解析 + 品牌名對到卡片標題」。
+映射怎么来（不靠人编，靠既有资料反推）：
+    `00-打法库.md` 的每条打法底下有一行 `**案例**：`，
+    里面写着 `cases/NN-xxx.md`（品牌名…） —— 这是**人工写过的权威映射**，
+    本脚本只做「反向解析 + 品牌名对到卡片标题」。
 
-做什麼：
-    1. 解析 104 條打法的 `**案例**` 行 → (打法 id, 案例檔, 品牌名集合)
-    2. 每個案例檔的每張卡（`### 3.N 品牌｜…`）→ 用品牌名匹配 → 可抄打法清單
-    3. `--fix` 時：
-       a. 寫出 `scripts/case_play_index.json`
-       b. 在每張卡的標題行下插入一行
-          `> **可抄打法**：§1.1 超級符號 ｜ §7.2 品牌諺語   （來自 00-打法库 案例行）`
+做什么：
+    1. 解析 104 条打法的 `**案例**` 行 → (打法 id, 案例档, 品牌名集合)
+    2. 每个案例档的每张卡（`### 3.N 品牌｜…`）→ 用品牌名匹配 → 可抄打法清单
+    3. `--fix` 时：
+       a. 写出 `scripts/case_play_index.json`
+       b. 在每张卡的标题行下插入一行
+          `> **可抄打法**：§1.1 超级符号 ｜ §7.2 品牌谚语   （来自 00-打法库 案例行）`
 
-硬不變式（--fix 時）：
-    1. 只**插入**一行 `> **可抄打法**：…`，其餘逐行不變
-    2. 冪等：已有該行的卡跳過
-    3. 匹配不到任何打法的卡**不插行**（寧可不標，不亂標）
+硬不变式（--fix 时）：
+    1. 只**插入**一行 `> **可抄打法**：…`，其余逐行不变
+    2. 幂等：已有该行的卡跳过
+    3. 匹配不到任何打法的卡**不插行**（宁可不标，不乱标）
 
 用法：
-    python scripts/case_play_index.py              # 只報告匹配率
-    python scripts/case_play_index.py --fix        # 寫索引 ＋ 打標
-    python scripts/case_play_index.py --list 01    # 看某一檔的匹配明細
-退出碼：0 正常；2 腳本出錯
+    python scripts/case_play_index.py              # 只报告匹配率
+    python scripts/case_play_index.py --fix        # 写索引 ＋ 打标
+    python scripts/case_play_index.py --list 01    # 看某一档的匹配明细
+退出码：0 正常；2 脚本出错
 """
 
 import argparse
@@ -64,16 +64,16 @@ MARK = "> **可抄打法**："
 
 
 def names_from(paren):
-    """從「（蜜雪冰城「雪王」，2018 年起、旺旺旺仔）」抽出品牌名候選"""
+    """从「（蜜雪冰城「雪王」，2018 年起、旺旺旺仔）」抽出品牌名候选"""
     p = (paren or "").strip()
-    p = re.sub(r"^[（(]|[）)]$", "", p)        # 先脫掉最外層括號
-    p = re.sub(r"[（(][^）)]*[）)]", "", p)     # 再去掉內層括註
+    p = re.sub(r"^[（(]|[）)]$", "", p)        # 先脱掉最外层括号
+    p = re.sub(r"[（(][^）)]*[）)]", "", p)     # 再去掉内层括注
     out = []
     for x in re.split(r"[、；，,]", p):
         x = x.strip()
-        x = re.sub(r"[「『].*$", "", x).strip()          # 「雪王」之後不要
+        x = re.sub(r"[「『].*$", "", x).strip()          # 「雪王」之后不要
         x = re.sub(r"\d{4}\s*年.*$", "", x).strip()      # 「2018 年起」不要
-        x = re.sub(r"^(見|參見|另見)\s*", "", x)
+        x = re.sub(r"^(见|参见|另见)\s*", "", x)
         if 2 <= len(x) <= 12 and re.search(r"[\u4e00-\u9fffA-Za-z]", x):
             out.append(x)
     return out
@@ -88,7 +88,7 @@ def parse_plays():
         m = RE_PLAY.match(l)
         if m:
             pid = m.group(1)
-            # §0.1–0.3 是「§0 總表」的分塊標題，不是打法；打法從 §1.1 起
+            # §0.1–0.3 是「§0 总表」的分块标题，不是打法；打法从 §1.1 起
             if pid.startswith("0.") or "§" in m.group(2):
                 cur = None
                 continue
@@ -97,25 +97,25 @@ def parse_plays():
             continue
         if cur is None:
             continue
-        if l.startswith("### "):        # 下一節（非打法）→ 收尾
+        if l.startswith("### "):        # 下一节（非打法）→ 收尾
             cur = None
             continue
         if l.startswith("**案例**"):
             for m2 in RE_CASEREF.finditer(l):
                 plays[cur]["refs"].append((m2.group(1), hint_candidates(m2.group(2))))
-            # 例外：案例行整行的品牌名（「見 cases/01-... 各品牌的定位起點段落」這種）
+            # 例外：案例行整行的品牌名（「见 cases/01-... 各品牌的定位起点段落」这种）
             plays[cur]["raw"] = l
     return plays
 
 
 def hint_candidates(hint):
-    """從打法的 `**案例**` 行抽出「可用來對卡片標題的品牌候選」。
+    """从打法的 `**案例**` 行抽出「可用来对卡片标题的品牌候选」。
 
-    為什麼要抽「前綴」：案例行寫的是描述句——「瑞幸 × 茅台醬香拿鐵，2023」、
-    「成分黨口播帳號開頭結構」——而卡片標題是「瑞幸 × 貴州茅台｜醬香拿鐵（2023）」。
-    直接整串比對命中率只有 1.8%（2026-09-17 實測）；切成 2–6 字前綴後升到 31%，
-    且抽樣檢查全部正確（超級符號→蜜雪冰城、品牌諺語→王老吉、包裝即媒體→農夫山泉…）。
-    **多出來的部分一律進「缺口清單」，不硬湊。**
+    为什么要抽「前缀」：案例行写的是描述句——「瑞幸 × 茅台酱香拿铁，2023」、
+    「成分党口播帐号开头结构」——而卡片标题是「瑞幸 × 贵州茅台｜酱香拿铁（2023）」。
+    直接整串比对命中率只有 1.8%（2026-09-17 实测）；切成 2–6 字前缀后升到 31%，
+    且抽样检查全部正确（超级符号→蜜雪冰城、品牌谚语→王老吉、包装即媒体→农夫山泉…）。
+    **多出来的部分一律进「缺口清单」，不硬凑。**
     """
     names = []
     for m in re.finditer(r"（([^）]*)）", hint or ""):
@@ -183,23 +183,23 @@ def main():
 
     no_ref = [p for p, i in plays.items() if not i["refs"]]
     tagged = [(f, t) for f, t in cards if (f, t) in card2play]
-    print(f"打法 {len(plays)} 條｜其中有案例指向的 {len(plays) - len(no_ref)} 條")
+    print(f"打法 {len(plays)} 条｜其中有案例指向的 {len(plays) - len(no_ref)} 条")
     if no_ref:
-        print(f"  無案例行（{len(no_ref)}）：{'、'.join('§' + x for x in sorted(no_ref)[:20])}"
+        print(f"  无案例行（{len(no_ref)}）：{'、'.join('§' + x for x in sorted(no_ref)[:20])}"
               + (" …" if len(no_ref) > 20 else ""))
-    print(f"案例卡 {len(cards)} 張｜可對上至少一條打法的 {len(tagged)} 張"
+    print(f"案例卡 {len(cards)} 张｜可对上至少一条打法的 {len(tagged)} 张"
           f"（{len(tagged) / max(len(cards), 1) * 100:.1f}%）")
 
-    # 每張卡對上的打法數分布
+    # 每张卡对上的打法数分布
     dist = {}
     for k in card2play:
         dist[len(card2play[k])] = dist.get(len(card2play[k]), 0) + 1
-    print("  每卡打法數分布：" + "｜".join(f"{k} 條→{v} 卡" for k, v in sorted(dist.items())))
+    print("  每卡打法数分布：" + "｜".join(f"{k} 条→{v} 卡" for k, v in sorted(dist.items())))
 
-    # 每條打法指向幾張卡
+    # 每条打法指向几张卡
     empty = [p for p in plays if plays[p]["refs"] and not play2card.get(p)]
     if empty:
-        print(f"  ⚠️ 有案例指向但對不上任何卡片（{len(empty)} 條）：{'、'.join('§' + x for x in sorted(empty))}")
+        print(f"  ⚠️ 有案例指向但对不上任何卡片（{len(empty)} 条）：{'、'.join('§' + x for x in sorted(empty))}")
 
     if a.list:
         for cf, title in cards:
@@ -209,24 +209,24 @@ def main():
                       + ("｜".join(f"§{p} {n}" for p, n in got) if got else "—"))
 
     if not a.fix:
-        print("\n（報告模式，未寫入。加 --fix 產出索引並打標）")
+        print("\n（报告模式，未写入。加 --fix 产出索引并打标）")
         sys.exit(0)
 
-    # ── 寫索引
+    # ── 写索引
     idx = {
-        "_note": "案例卡 ↔ 打法 双向索引（由 case_play_index.py 從 00-打法库 的案例行反推）。"
-                 "composer.py 消費此檔注入真實案例內容。改映射請改 00-打法库 的案例行後重跑。",
+        "_note": "案例卡 ↔ 打法 双向索引（由 case_play_index.py 从 00-打法库 的案例行反推）。"
+                 "composer.py 消费此档注入真实案例内容。改映射请改 00-打法库 的案例行后重跑。",
         "_version": "2026-09-17",
         "play_to_cards": {p: [{"file": f, "card": t} for f, t in v] for p, v in play2card.items()},
         "card_to_plays": {f"{f}||{t}": [{"play": p, "name": n} for p, n in v]
                           for (f, t), v in card2play.items()},
     }
     json.dump(idx, open(OUT_JSON, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(f"\n✅ 索引已寫入 {os.path.relpath(OUT_JSON, ROOT)}")
+    print(f"\n✅ 索引已写入 {os.path.relpath(OUT_JSON, ROOT)}")
 
-    # ── 打標
-    #    先**剝掉所有舊標**再重打 —— 因為標裡的文字（打法名、覆蓋率提示）會隨
-    #    00-打法库 的修復而變化，「下一行已有標就跳過」會讓舊標永遠留著（第一版就這樣）。
+    # ── 打标
+    #    先**剥掉所有旧标**再重打 —— 因为标里的文字（打法名、覆盖率提示）会随
+    #    00-打法库 的修复而变化，「下一行已有标就跳过」会让旧标永远留著（第一版就这样）。
     changed = skipped = total_ins = 0
     for f in sorted(glob.glob(os.path.join(CASES, "*.md"))):
         base = os.path.basename(f)
@@ -251,7 +251,7 @@ def main():
                     uniq.append((p, n))
             out.append(MARK + " ｜ ".join(f"§{p} {n}" for p, n in uniq[:5])
                        + "　（由 `references/00-打法库.md` 的 `**案例**` 行反查；"
-                         "**未標記 ≠ 不適用**，只代表該卡尚未被任何打法指名）")
+                         "**未标记 ≠ 不适用**，只代表该卡尚未被任何打法指名）")
             ins += 1
         if had == ins and raw == raw:
             skipped += 1
@@ -259,7 +259,7 @@ def main():
             open(f, "w", encoding="utf-8").write("\n".join(out))
             changed += 1
         total_ins += ins
-    print(f"✅ 打標完成：{changed} 檔更新／{total_ins} 張卡有標｜未變 {skipped} 檔")
+    print(f"✅ 打标完成：{changed} 档更新／{total_ins} 张卡有标｜未变 {skipped} 档")
     sys.exit(0)
 
 
@@ -267,5 +267,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ 執行出錯：{type(e).__name__}: {e}")
+        print(f"❌ 执行出错：{type(e).__name__}: {e}")
         sys.exit(2)

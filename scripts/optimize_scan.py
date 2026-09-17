@@ -3,7 +3,7 @@
 """optimize_scan.py — 每轮自检产出 10 条「可优化点」（带证据）
 
 为什么要有它（2026-09-17 用户要求）：
-    「自檢50次，把所有部分包括整個鏈條整個鏈路都驗證一下，每次自檢都提出十個可優化的地方。」
+    「自检50次，把所有部分包括整个链条整个链路都验证一下，每次自检都提出十个可优化的地方。」
     问题：`verify_all -n 50` 跑 50 遍，**每一遍的输出是一模一样的全绿** ——
     它证明「没有漂移」，但证明不了「没有可改进的地方」。
     所以要另配一把尺子：跑一次，就吐 10 条**带位置、带证据、带成本**的改进项；
@@ -80,15 +80,15 @@ def d2_doc_drift():
     n_cli = sum(1 for f in py_files()
                 if '__name__ == "__main__"' in read(f))
     skill = read(os.path.join(ROOT, "SKILL.md"))
-    m = re.search(r"本 skill 附帶 \*\*(\d+) 個腳本\*\*", skill)
+    m = re.search(r"本 skill 附带 \*\*(\d+) 个脚本\*\*", skill)
     if m and int(m.group(1)) != n_scripts:
-        add("文档漂移", f"SKILL.md（『本 skill 附帶 N 個腳本』）",
+        add("文档漂移", f"SKILL.md（『本 skill 附带 N 个脚本』）",
             f"写的 {m.group(1)}，实际 {n_scripts}",
             "读者按这个数字判断工具面有多大；对不上＝文档没跟上代码",
             f"改成 {n_scripts}（并把 CLI 数写成 {n_cli}）", 2)
-    m = re.search(r"A 介面（(\d+) 支 CLI 腳本", skill)
+    m = re.search(r"A 接口（(\d+) 支 CLI 脚本", skill)
     if m and int(m.group(1)) != n_cli:
-        add("文档漂移", "SKILL.md（verify_all 行『A 介面（N 支 CLI 腳本）』）",
+        add("文档漂移", "SKILL.md（verify_all 行『A 接口（N 支 CLI 脚本）』）",
             f"写的 {m.group(1)}，实际 {n_cli}",
             "A 关的基数是硬数字，写错会让人以为有脚本没被测到",
             f"改成 {n_cli}", 2)
@@ -165,7 +165,7 @@ def d6_todo():
     #    `re.search(r"\b(FIXME|XXX|HACK)\b", ...)`（本检测器自己）都不是遗留标记，
     #    而是「在找这些记号」。与 D7 同一类误报，同一套豁免逻辑。
     # 自指误报的处理：令牌用**相邻字符串拼接**写，源码里看不到完整字面量，
-    # 运行时值不变。否则扫描器会把自己这一行算成「代码里留有遗留标记」。
+    # 运行时值不变。否则扫描仪会把自己这一行算成「代码里留有遗留标记」。
     _toks = ("FIX" "ME", "XX" "X", "HA" "CK")
     _skip = re.compile("|".join((("FIX" "ME"), ("XX" "X"), ("HA" "CK"),
                                  "PLACEHOLDER", r"re\.search\(")))
@@ -265,9 +265,9 @@ def main():
     for fn in DIMS:
         try:
             fn()
-        except Exception as e:      # 扫描器自己不许静默失败
-            add("扫描器自身", fn.__name__, f"该维度扫描出错：{type(e).__name__}: {e}",
-                "扫描器漏掉的维度＝没人看的盲区", "修这个维度的实现", 3)
+        except Exception as e:      # 扫描仪自己不许静默失败
+            add("扫描仪自身", fn.__name__, f"该维度扫描出错：{type(e).__name__}: {e}",
+                "扫描仪漏掉的维度＝没人看的盲区", "修这个维度的实现", 3)
 
     FINDINGS.sort(key=lambda x: -x["sev"])
     show = FINDINGS if a.all else FINDINGS[:a.top]

@@ -4,7 +4,7 @@
 案例卡升级校验 · case_upgrade.py
 
 目标（用户 2026-09-16 定）：全 620 张深度卡统一为**五要素**并在现有基础上补全：
-    ① 是什麼  ② 為什麼（問題/目標）  ③ 做了什麼  ④ 怎麼做  ⑤ 效果
+    ① 是什么  ② 为什么（问题/目标）  ③ 做了什么  ④ 怎么做  ⑤ 效果
 + 目标篇幅 ≥2500 字（详细版）；效果查不到的写「未披露」，不编造。
 
 本脚本把「五要素齐不齐、字数够不够」变成机械可查（模型不会看文字规则）。
@@ -26,22 +26,22 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 
-# 要素必須以「- **① …**」形式出現（與 case_order.py 的 RE_ELEM 對齊）。
-# 2026-09-16 收緊：原先接受「為什麼」「結果」等裸詞，正文裡偶然提到就會誤判為達標
-# （寬/嚴口徑當時同為 247/409，無假陽性，但屬潛在風險，故改為標記式精確匹配）。
+# 要素必须以「- **① …**」形式出现（与 case_order.py 的 RE_ELEM 对齐）。
+# 2026-09-16 收紧：原先接受「为什么」「结果」等裸词，正文里偶然提到就会误判为达标
+# （宽/严口径当时同为 247/409，无假阳性，但属潜在风险，故改为标记式精确匹配）。
 ELEM = {
-    "① 是什麼": ["- **① 是什麼**"],
-    "② 為什麼": ["- **② 為什麼**"],
-    "③ 做了什麼": ["- **③ 做了什麼**"],
-    "④ 怎麼做": ["- **④ 怎麼做**"],
+    "① 是什么": ["- **① 是什么**"],
+    "② 为什么": ["- **② 为什么**"],
+    "③ 做了什么": ["- **③ 做了什么**"],
+    "④ 怎么做": ["- **④ 怎么做**"],
     "⑤ 效果": ["- **⑤ 效果**"],
 }
 
 
 def cards(path):
     t = open(path, encoding="utf-8").read()
-    # 非案例卡：標題含「專節／清單／總表／速查」的是參考頁，不按五要素考核
-    NON_CASE = ("專節", "清單", "總表", "速查", "對照表", "對照（", "必讀")
+    # 非案例卡：标题含「专节／清单／总表／速查」的是参考页，不按五要素考核
+    NON_CASE = ("专节", "清单", "总表", "速查", "对照表", "对照（", "必读")
     for m in re.finditer(r"(?m)^###\s+(\d+\.\d+)\s+(.+)$", t):
         if any(k in m.group(2) for k in NON_CASE):
             continue
@@ -60,7 +60,7 @@ def main():
     files = sorted(glob.glob(os.path.join(ROOT, "references", "cases", "*.md")))
     def _num(fp):
         m = re.match(r"(\d+)", os.path.basename(fp))
-        return int(m.group(1)) if m else 999  # 非編號檔（README.md 等）一律排除
+        return int(m.group(1)) if m else 999  # 非编号档（README.md 等）一律排除
     files = [f for f in files if _num(f) <= 45]
     if a.file:
         files = [f for f in files if os.path.basename(f).startswith(a.file)]
@@ -96,6 +96,6 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"❌ {type(e).__name__}: {e}")
-        print("→ 先确认案例檔編碼為 UTF-8、且 sections 標題格式未被改動；"
-              "若屬環境問題，跳過本腳本不影響交付（它只做質量統計）。")
+        print("→ 先确认案例档编码为 UTF-8、且 sections 标题格式未被改动；"
+              "若属环境问题，跳过本脚本不影响交付（它只做质量统计）。")
         sys.exit(2)

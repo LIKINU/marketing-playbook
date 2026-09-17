@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """structure_fix.py — 交付稿「结构体检 ＋ 重编号」
 
-為什麼要有它（2026-09-17，瞳话案原地踩出来的）：
+为什么要有它（2026-09-17，瞳话案原地踩出来的）：
     那份 4 万字项目书把「团队十章」映射进「官方四部分」之后，编号变成
         一 → 三 → 三 → 二 → 四 → 五 → 八 →（无号）→ 六 → 七 → 九 → 十（消失）
-    还带 4 处「见第三部分 1.1」这类**指向不存在章節**的交叉引用。
+    还带 4 处「见第三部分 1.1」这类**指向不存在章节**的交叉引用。
     这些全是**机械问题**，但我当时是临时写了个一次性脚本改的 —— 下次还得重写。
     → 固化成工具：体检（只报）+ 重编号（--renumber）+ 引用重写（--refmap）。
 
@@ -79,30 +79,30 @@ class Doc:
     # ── 体检 ────────────────────────────────────────────────
     def audit(self):
         hard, warn = [], []
-        # ① 章號重複
+        # ① 章号重复
         seen = {}
         for part, c, t, _ in self.parts:
             k = (part, c)
             if k in seen:
-                hard.append(f"章號重複：第{part}部分「{c}、{t}」與「{c}、{seen[k]}」")
+                hard.append(f"章号重复：第{part}部分「{c}、{t}」与「{c}、{seen[k]}」")
             seen[k] = t
-        # ② 章號遞增
+        # ② 章号递增
         lastp, lastv = None, 0
         for part, c, t, _ in self.parts:
             if part != lastp:
                 lastp, lastv = part, 0
             v = CN2I.get(c, 0)
             if v and v < lastv:
-                warn.append(f"章號倒序：第{part}部分「{c}、{t}」排在更大的編號之後")
+                warn.append(f"章号倒序：第{part}部分「{c}、{t}」排在更大的编号之后")
             lastv = max(lastv, v)
-        # ③ 子編號重複（同部分）
+        # ③ 子编号重复（同部分）
         bucket = {}
         for li, part, chap, sec, i, j in self.subs:
             bucket.setdefault((part, f"{i}.{j}"), []).append(li)
         for (part, num), ls in bucket.items():
             if len(ls) > 1:
-                hard.append(f"子編號重複：第{part}部分 {num} 出現 {len(ls)} 次（行 {ls}）")
-        # ④ 章內子編號遞增
+                hard.append(f"子编号重复：第{part}部分 {num} 出现 {len(ls)} 次（行 {ls}）")
+        # ④ 章内子编号递增
         grp = {}
         for li, part, chap, sec, i, j in self.subs:
             grp.setdefault((part, chap or f"§{sec}"), []).append((i, j, li))
@@ -111,9 +111,9 @@ class Doc:
             seq = [x[1] for x in ls]
             if seq != sorted(seq):
                 at = next(n for n in range(1, len(seq)) if seq[n] < seq[n - 1])
-                warn.append(f"章內子編號非遞增：第{k[0]}部分「{k[1]}」"
+                warn.append(f"章内子编号非递增：第{k[0]}部分「{k[1]}」"
                             f"{ls[at-1][0]}.{ls[at-1][1]} → {ls[at][0]}.{ls[at][1]}")
-        # ⑤ 帶部分號的引用
+        # ⑤ 带部分号的引用
         idx = {(p, f"{i}.{j}") for _, p, _, _, i, j in self.subs}
         refs, dangling = [], []
         for li, ln in enumerate(self.lines):
@@ -123,32 +123,32 @@ class Doc:
                     dangling.append((li, m.group(0),
                                      f"第{m.group(1)}部分 {m.group(2)}"))
         for li, s, why in dangling:
-            hard.append(f"懸空引用（行 {li + 1}）：「{s}」→ {why} 不存在")
-        # ⑥ 不帶部分號的「裸引用」（如「（4.3 节）」）—— 目標落在哪個部分靠上下文推斷，
-        #    脚本**不猜**：只列出來，要求人用 --refmap 指認。
-        #    實測教訓：瞳話案第四部分的「诊断结论是信任问题（4.3 节）」其實指的是**第二部分**，
-        #    若按「就近原則」自動改，必然改錯。
+            hard.append(f"悬空引用（行 {li + 1}）：「{s}」→ {why} 不存在")
+        # ⑥ 不带部分号的「裸引用」（如「（4.3 节）」）—— 目标落在哪个部分靠上下文推断，
+        #    脚本**不猜**：只列出来，要求人用 --refmap 指认。
+        #    实测教训：瞳话案第四部分的「诊断结论是信任问题（4.3 节）」其实指的是**第二部分**，
+        #    若按「就近原则」自动改，必然改错。
         bare = []
         for li, ln in enumerate(self.lines):
             for m in re.finditer(r"(?<!部分)(?<!第)([0-9]+\.[0-9]+)\s*节", ln):
                 bare.append((li, m.group(1)))
         return hard, warn, refs, bare
 
-    # ── 重編號 ──────────────────────────────────────────────
+    # ── 重编号 ──────────────────────────────────────────────
     def renumber(self):
-        """按**正文出現順序**重編章號為 一、二、三…；子編號同步重排。
+        """按**正文出现顺序**重编章号为 一、二、三…；子编号同步重排。
 
-        基數（base）的判定規則 —— 這是實測踩出來的，不是拍腦袋：
-          · 進入「## N. xxx」節 → base = N（官方四部分的自有编号：第四部分的 1.1–7.3 就靠它）
-          · 出現「### 中文數字、xxx」章 → base = 該章的新章號（團隊十章的 1.1–9.3 靠它）
-          · 兩者都沒有 → base 沿用本部分已用到的最大章號
-          子序號在 **(部分, ##節, base)** 內累加；base 一變就重新從 1 開始。
-        ⚠️ 兩個曾經踩過的坑：
-          ① 一度讓同一部分所有「無編號 ## 節」共用一個 base → 第四部分的
-             ## 1./## 2./… 全被編成 9.1、9.1… **互相撞號**。
-          ② 附錄的自有編號（附錄九的 9.1–9.6）**不屬於**章節體系，必須原樣保留，
-             否則會變成 10.1–10.6，「附錄九 ↔ 10.x」直接對不上。
-        回傳 (新行, 子編號映射 {(部分,舊) -> (部分,新)}, 章號映射)。"""
+        基数（base）的判定规则 —— 这是实测踩出来的，不是拍脑袋：
+          · 进入「## N. xxx」节 → base = N（官方四部分的自有编号：第四部分的 1.1–7.3 就靠它）
+          · 出现「### 中文数字、xxx」章 → base = 该章的新章号（团队十章的 1.1–9.3 靠它）
+          · 两者都没有 → base 沿用本部分已用到的最大章号
+          子序号在 **(部分, ##节, base)** 内累加；base 一变就重新从 1 开始。
+        ⚠️ 两个曾经踩过的坑：
+          ① 一度让同一部分所有「无编号 ## 节」共用一个 base → 第四部分的
+             ## 1./## 2./… 全被编成 9.1、9.1… **互相撞号**。
+          ② 附录的自有编号（附录九的 9.1–9.6）**不属于**章节体系，必须原样保留，
+             否则会变成 10.1–10.6，「附录九 ↔ 10.x」直接对不上。
+        回传 (新行, 子编号映射 {(部分,旧) -> (部分,新)}, 章号映射)。"""
         new_lines = list(self.lines)
         chap_map, sub_map = {}, {}
         seq = 0
@@ -163,9 +163,9 @@ class Doc:
             if m and not ln.startswith("###"):
                 sec = m.group(2)
                 mn = re.match(r"^([0-9]+)[.、]", sec)
-                # 附錄／附件自成編號體系 → 不參與重編號
+                # 附录／附件自成编号体系 → 不参与重编号
                 base = int(mn.group(1)) if mn else None
-                if re.match(r"^附[錄录件]", sec):
+                if re.match(r"^附[录录件]", sec):
                     base = "SKIP"
                 continue
             m = RE_CHAP.match(ln)
@@ -178,7 +178,7 @@ class Doc:
             m = RE_SUB.match(ln)
             if m:
                 if base == "SKIP":
-                    continue                      # 附錄自有編號：原樣不動
+                    continue                      # 附录自有编号：原样不动
                 b = base if isinstance(base, int) else (seq or 1)
                 k = (part, sec, b)
                 idx[k] = idx.get(k, 0) + 1
@@ -188,17 +188,17 @@ class Doc:
         return new_lines, sub_map, chap_map
 
     def rewrite_refs(self, lines, sub_map, refmap):
-        """改寫引用。順序很要緊：
-        ① 先**字面**套人工 refmap（最長鍵優先）—— 這是唯一能處理「不帶部分號的裸引用」
-           與「原本就指錯的引用」的手段；
-        ② 再自動解析剩下的「第X部分 A.B」—— 這類目標唯一，可靠機械映射；
-        ③ 仍解不出的**不猜**，原樣保留並回報。
+        """改写引用。顺序很要紧：
+        ① 先**字面**套人工 refmap（最长键优先）—— 这是唯一能处理「不带部分号的裸引用」
+           与「原本就指错的引用」的手段；
+        ② 再自动解析剩下的「第X部分 A.B」—— 这类目标唯一，可靠机械映射；
+        ③ 仍解不出的**不猜**，原样保留并回报。
         """
         out = list(lines)
         changed, unresolved = [], []
 
-        # ① 人工映射先落，但**用占位符保护**其结果 —— 否则它寫出來的新編號會被第 ② 步
-        #   當成「舊編號」再映射一次（實測：第三部分 5.4 → 6.4 → 又被映射成別的東西）。
+        # ① 人工映射先落，但**用占位符保护**其结果 —— 否则它写出来的新编号会被第 ② 步
+        #   当成「旧编号」再映射一次（实测：第三部分 5.4 → 6.4 → 又被映射成别的东西）。
         guard = {}
         for n, k in enumerate(sorted(refmap.keys(), key=len, reverse=True)):
             v = refmap[k]
@@ -212,7 +212,7 @@ class Doc:
                 guard[tok] = v
                 changed.append(f"{k} → {v}（人工指定，{hit} 处）")
 
-        # ② 自動映射剩下的「第X部分 A.B」
+        # ② 自动映射剩下的「第X部分 A.B」
         for li, ln in enumerate(out):
             new = ln
             for m in re.finditer(r"第([一二三四五六七八九十]+)部分\s*([0-9]+\.[0-9]+)", ln):
@@ -228,7 +228,7 @@ class Doc:
                     unresolved.append(key)
             out[li] = new
 
-        # ③ 還原人工映射的結果
+        # ③ 还原人工映射的结果
         for li in range(len(out)):
             for tok, v in guard.items():
                 if tok in out[li]:
@@ -237,29 +237,29 @@ class Doc:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="交付稿結構體檢 ＋ 重編號（不改標題文字，只動編號與引用）")
+    ap = argparse.ArgumentParser(description="交付稿结构体检 ＋ 重编号（不改标题文字，只动编号与引用）")
     ap.add_argument("md")
-    ap.add_argument("-o", "--out", default="", help="輸出修復後的 md（不給＝只體檢不寫檔）")
-    ap.add_argument("--renumber", action="store_true", help="按正文出現順序重編章號與子編號")
+    ap.add_argument("-o", "--out", default="", help="输出修复后的 md（不给＝只体检不写档）")
+    ap.add_argument("--renumber", action="store_true", help="按正文出现顺序重编章号与子编号")
     ap.add_argument("--refmap", default="", help="人工引用映射 JSON：{\"第三部分 1.1\": \"第三部分 4.1\"}")
-    ap.add_argument("--report", default="", help="把體檢／修復報告寫到這個路徑")
+    ap.add_argument("--report", default="", help="把体检／修复报告写到这个路径")
     a = ap.parse_args()
 
     if not os.path.exists(a.md):
-        print(f"❌ 找不到檔案：{a.md}")
+        print(f"❌ 找不到文件：{a.md}")
         sys.exit(2)
     text = open(a.md, encoding="utf-8").read()
     doc = Doc(text)
 
     R = []
-    R.append("# 結構體檢報告\n")
-    R.append(f"> 對象：`{os.path.basename(a.md)}`　｜　由 `scripts/structure_fix.py` 生成\n")
-    R.append(f"> 章節（### 中文數字、）{len(doc.parts)} 個　｜　子章節 {len(doc.subs)} 個\n")
+    R.append("# 结构体检报告\n")
+    R.append(f"> 对象：`{os.path.basename(a.md)}`　｜　由 `scripts/structure_fix.py` 生成\n")
+    R.append(f"> 章节（### 中文数字、）{len(doc.parts)} 个　｜　子章节 {len(doc.subs)} 个\n")
 
     print("=" * 66)
-    print("交付稿結構體檢 · structure_fix.py")
+    print("交付稿结构体检 · structure_fix.py")
     print("=" * 66)
-    print(f"  章節 {len(doc.parts)} 個　｜　子章節 {len(doc.subs)} 個")
+    print(f"  章节 {len(doc.parts)} 个　｜　子章节 {len(doc.subs)} 个")
 
     hard, warn, refs, bare = doc.audit()
     rmap = {}
@@ -269,51 +269,51 @@ def main():
             sys.exit(2)
         rmap = json.loads(open(a.refmap, encoding="utf-8").read())
 
-    R.append("\n## 一、體檢結果\n")
-    R.append(f"- 帶部分號的引用：**{len(refs)} 處**\n")
-    R.append(f"- 硬問題：**{len(hard)}**　｜　警告：**{len(warn)}**\n")
+    R.append("\n## 一、体检结果\n")
+    R.append(f"- 带部分号的引用：**{len(refs)} 处**\n")
+    R.append(f"- 硬问题：**{len(hard)}**　｜　警告：**{len(warn)}**\n")
     if hard:
-        R.append("\n### 硬問題（必修）\n")
+        R.append("\n### 硬问题（必修）\n")
         for x in hard:
             R.append(f"- ❌ {x}\n")
     if warn:
-        R.append("\n### 警告（建議修）\n")
+        R.append("\n### 警告（建议修）\n")
         for x in warn:
             R.append(f"- ⚠️ {x}\n")
-    print(f"  硬問題 {len(hard)}　｜　警告 {len(warn)}")
+    print(f"  硬问题 {len(hard)}　｜　警告 {len(warn)}")
     for x in hard[:8]:
         print(f"    ❌ {x}")
     for x in warn[:6]:
         print(f"    ⚠️  {x}")
     if bare:
-        print(f"  ⚠️  不帶部分號的裸引用 {len(bare)} 處（目標靠上下文，脚本不猜）："
+        print(f"  ⚠️  不带部分号的裸引用 {len(bare)} 处（目标靠上下文，脚本不猜）："
               + "、".join(f"行 {li+1}「{n} 节」" for li, n in bare[:6]))
-        R.append(f"\n### 不帶部分號的裸引用（{len(bare)} 處，需人工指認）\n")
+        R.append(f"\n### 不带部分号的裸引用（{len(bare)} 处，需人工指认）\n")
         for li, n in bare:
-            R.append(f"- 行 {li+1}：「{n} 节」 —— 目標落在哪個部分要靠上下文，"
-                     f"自動改必錯。請用 `--refmap` 指定，例如 `{{\"（{n} 节）\": \"（X.Y 节）\"}}`\n")
+            R.append(f"- 行 {li+1}：「{n} 节」 —— 目标落在哪个部分要靠上下文，"
+                     f"自动改必错。请用 `--refmap` 指定，例如 `{{\"（{n} 节）\": \"（X.Y 节）\"}}`\n")
 
     lines, changed = list(doc.lines), []
     unresolved = []
     if a.renumber:
         lines, sub_map, chap_map = doc.renumber()
         lines, changed, unresolved = doc.rewrite_refs(lines, sub_map, rmap)
-        print(f"\n  重編號：章號 {len(chap_map)} 個；標題文字一律未動")
-        print(f"  引用改寫：{len(changed)} 處；仍未解 {len(unresolved)} 處")
+        print(f"\n  重编号：章号 {len(chap_map)} 个；标题文字一律未动")
+        print(f"  引用改写：{len(changed)} 处；仍未解 {len(unresolved)} 处")
         for x in changed:
             print(f"    ✅ {x}")
         for x in unresolved:
-            print(f"    ⚠️  無法自動判定：{x}　→ 用 --refmap 指到正確章節（不要猜）")
-        R.append("\n## 二、重編號\n")
-        R.append(f"- 章號重編：{len(chap_map)} 個（**標題文字一律未改**）\n")
-        R.append(f"- 引用改寫：{len(changed)} 處\n")
+            print(f"    ⚠️  无法自动判定：{x}　→ 用 --refmap 指到正确章节（不要猜）")
+        R.append("\n## 二、重编号\n")
+        R.append(f"- 章号重编：{len(chap_map)} 个（**标题文字一律未改**）\n")
+        R.append(f"- 引用改写：{len(changed)} 处\n")
         for x in changed:
             R.append(f"  - {x}\n")
         if unresolved:
-            R.append(f"\n### 仍未解（需人給 `--refmap`）\n")
+            R.append(f"\n### 仍未解（需人给 `--refmap`）\n")
             for x in unresolved:
                 R.append(f"- ⚠️ {x}\n")
-        R.append("\n## 三、重編號後的章節順序\n")
+        R.append("\n## 三、重编号后的章节顺序\n")
         cur_part = None
         for ln in lines:
             m = RE_PART.match(ln)
@@ -327,17 +327,17 @@ def main():
 
     if a.out:
         open(a.out, "w", encoding="utf-8").write("\n".join(lines))
-        print(f"\n  已寫出：{a.out}")
-        R.append(f"\n---\n\n> 修復後檔案：`{os.path.basename(a.out)}`\n")
+        print(f"\n  已写出：{a.out}")
+        R.append(f"\n---\n\n> 修复后文件：`{os.path.basename(a.out)}`\n")
     if a.report:
         open(a.report, "w", encoding="utf-8").write("".join(R))
-        print(f"  已寫出報告：{a.report}")
+        print(f"  已写出报告：{a.report}")
 
     if unresolved and not rmap:
-        print("\n⚠️ 有引用無法自動判定目標 —— 依「不可解則不猜」原則，**没有硬套**。")
-        print("   請人工確認後用 --refmap 指定，或手工改。")
+        print("\n⚠️ 有引用无法自动判定目标 —— 依「不可解则不猜」原则，**没有硬套**。")
+        print("   请人工确认后用 --refmap 指定，或手工改。")
         sys.exit(1)
-    print("\n✅ 體檢完成。" + ("　硬問題已隨重編號一併處理。" if a.renumber and not hard else ""))
+    print("\n✅ 体检完成。" + ("　硬问题已随重编号一并处理。" if a.renumber and not hard else ""))
     sys.exit(0)
 
 
@@ -345,5 +345,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"\n❌ structure_fix 執行出錯：{type(e).__name__}: {e}")
+        print(f"\n❌ structure_fix 执行出错：{type(e).__name__}: {e}")
         sys.exit(2)

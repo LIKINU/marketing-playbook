@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""案例卡精簡摘要 · 只印寫 ②/洞察/花了多少/適配/常見錯誤/本檔關聯 所需的骨幹"""
+"""案例卡精简摘要 · 只印写 ②/洞察/花了多少/适配/常见错误/本档关联 所需的骨干"""
 import re, sys, glob, os
 
 def blocks(text):
@@ -32,7 +32,7 @@ for pat in sys.argv[1].split(","):
             s = l.strip()
             if not s or s == "---":
                 continue
-            if re.match(r"^- \*\*(① 是什麼|誰做的|② 為什麼|洞察|③ 做了什麼|④ 怎麼做|花了多少|⑤ 效果)", s):
+            if re.match(r"^- \*\*(① 是什么|谁做的|② 为什么|洞察|③ 做了什么|④ 怎么做|花了多少|⑤ 效果)", s):
                 print("  " + (s if len(s) <= CUT else s[:CUT] + "…"))
             elif re.match(r"^(  - |  \d+\. |\d+\. |  - \*\*)", l) and len(s) > 4:
                 print("  " + (s if len(s) <= CUT else s[:CUT] + "…"))

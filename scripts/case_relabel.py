@@ -3,15 +3,15 @@
 """
 案例卡五要素·结构层 · case_relabel.py
 
-用户定调（2026-09-16）：每张卡要「加上 ① 是什麼 ② 為什麼 ③ 做了什麼 ④ 怎麼做 ⑤ 效果」，
+用户定调（2026-09-16）：每张卡要「加上 ① 是什么 ② 为什么 ③ 做了什么 ④ 怎么做 ⑤ 效果」，
 且是**在现有内容上添加**（原文不删）。
 
 本脚本做**机械结构层**（不编造任何内容）：
-  ① 是什麼   ← 由卡标题「品牌｜角度（年份）」推导一行
-  ② 為什麼   ← 把「解決了什麼問題／當時的問題/目標 (及變體)」改名为 ②
-  ③ 做了什麼 ← 有「做了什麼」就改名；否则插一行「见④的 N 步」指针
-  ④ 怎麼做   ← 把「具體做了什麼／具體動作」改名为 ④
-  ⑤ 效果     ← 把「結果／得到了什麼結果」改名为 ⑤
+  ① 是什么   ← 由卡标题「品牌｜角度（年份）」推导一行
+  ② 为什么   ← 把「解决了什么问题／当时的问题/目标 (及变体)」改名为 ②
+  ③ 做了什么 ← 有「做了什么」就改名；否则插一行「见④的 N 步」指针
+  ④ 怎么做   ← 把「具体做了什么／具体动作」改名为 ④
+  ⑤ 效果     ← 把「结果／得到了什么结果」改名为 ⑤
 已存在的标签一律不动；原文一字不删。
 
 用法：
@@ -29,12 +29,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 
-WHY_SRC = ["解決了什麼問題", "当时的问题/目标", "當時的問題/目標", "問題/目標", "问题/目标", "為什麼", "为什么"]
-HOW_SRC = ["具體做了什麼", "具体做了什么", "具體動作"]
-DID_SRC = ["做了什麼", "做了什么"]
-EFF_SRC = ["得到了什麼結果", "结果", "結果", "效果"]
+WHY_SRC = ["解决了什么问题", "当时的问题/目标", "当时的问题/目标", "问题/目标", "问题/目标", "为什么", "为什么"]
+HOW_SRC = ["具体做了什么", "具体做了什么", "具体动作"]
+DID_SRC = ["做了什么", "做了什么"]
+EFF_SRC = ["得到了什么结果", "结果", "结果", "效果"]
 
-L1, L2, L3, L4, L5 = "① 是什麼", "② 為什麼", "③ 做了什麼", "④ 怎麼做", "⑤ 效果"
+L1, L2, L3, L4, L5 = "① 是什么", "② 为什么", "③ 做了什么", "④ 怎么做", "⑤ 效果"
 
 
 def has(seg, *labels):
@@ -59,8 +59,8 @@ def process(path, apply):
         body = "\n".join(seg)
         title = m.group(2)
         ins = []
-        # ① 是什麼（缺才插）
-        if not has(body, L1, "①是什麼"):
+        # ① 是什么（缺才插）
+        if not has(body, L1, "①是什么"):
             parts = re.split(r"[｜|]", title)
             brand = parts[0].strip()
             angle = parts[1].strip() if len(parts) > 1 else title
@@ -82,7 +82,7 @@ def process(path, apply):
         # ③ 仍缺 → 插指针
         if not has(body2, L3):
             nhow = len(re.findall(r"(?m)^\s{2,}\d+[.、]", body2))
-            ins.append(f"- **{L3}**：共 {nhow} 件事，分步做法见下方「{L4}」" if nhow else f"- **{L3}**：（本卡未展開，詳見下）")
+            ins.append(f"- **{L3}**：共 {nhow} 件事，分步做法见下方「{L4}」" if nhow else f"- **{L3}**：（本卡未展开，详见下）")
         # 插到标题后的第一个空行之后（保留原有 > 引言在最上面）
         k = 1
         while k < len(seg) and (seg[k].startswith(">") or not seg[k].strip()):
@@ -106,7 +106,7 @@ def main():
         a.dry_run = True
     def _num(fp):
         m = re.match(r"(\d+)", os.path.basename(fp))
-        return int(m.group(1)) if m else 999  # 非編號檔（README.md 等）一律排除
+        return int(m.group(1)) if m else 999  # 非编号档（README.md 等）一律排除
 
     files = [f for f in sorted(glob.glob(os.path.join(ROOT, "references", "cases", "*.md")))
              if _num(f) <= 50]

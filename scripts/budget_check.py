@@ -162,6 +162,66 @@ def main():
             sys.exit(1)
         data = {"items": items, "total": total}
 
+    # ── R2-8：從成稿裡**回讀**單位經濟（原實現只認 JSON 的 unit_economics，
+    #    於是成稿裡寫的「單客獲取成本 X 元」永遠不會被複算 —— 寫錯也全綠）
+    if md is not None and not data.get("unit_economics"):
+        _ue = {}
+        for _k, _pat in (("cac", r"單客獲取成本|单客获取成本|CAC"),
+                         ("ltv", r"生命週期價值|生命周期价值|LTV"),
+                         ("payback", r"回本週期|回本周期")):
+            _m = re.search(_pat + r"[^\n]{0,20}?(\d+(?:\.\d+)?)", md)
+            if _m:
+                _ue[_k] = float(_m.group(1))
+        if len(_ue) >= 2:
+            data["unit_economics"] = _ue
+            print(f"→ 從成稿回讀到單位經濟：{_ue}（將參與複算）")
+        if _ue.get("cac") and _ue.get("ltv"):
+            _ratio = _ue["ltv"] / _ue["cac"]
+            _mark = OK if _ratio >= 3 else NG
+            print(f"  {_mark} LTV / CAC = {_ratio:.2f}（判據 ≥3；<1 是賣一單虧一單）")
+
+    # ── R2-9：百分比基數與口徑混用（原實現只查「分項加總＝合計」一條）
+    #    ⚠️ 2026-09-17 实测误报并修正：初版把「/月」与「/年」的检查做成**整份文档**范围，
+    #       于是标杆稿（月度人力 + 年度投放分列在不同表、各自标注清楚）被误判。
+    #       口径只能在**同一张表内**比较 —— 改成按表块判断。
+    #       同时分两级：占比加总≠100% 是**算术错误**（拦）；月/年混列是**启发式**（只警告）。
+    oc_bad = []
+    WARNS = []       # 启发式警告（不拦）
+    if md is not None:
+        # 切出所有表块（连续以 | 开头的行）
+        _blocks, _cur = [], []
+        for _ln in md.split("\n"):
+            if _ln.strip().startswith("|"):
+                _cur.append(_ln)
+            elif _cur:
+                _blocks.append("\n".join(_cur)); _cur = []
+        if _cur:
+            _blocks.append("\n".join(_cur))
+        for _blk in _blocks:
+            _lines = [l for l in _blk.split("\n") if l.strip().startswith("|")]
+            if len(_lines) < 2:
+                continue
+            _hdr = _lines[0]
+            # ① 佔比列加總 ≠ 100%（同一张表内）
+            if re.search(r"占比|佔比|比例", _hdr) and not re.search(r"金額|金额|元", _hdr):
+                _vals = []
+                for _ln in _lines[1:]:
+                    if re.match(r"^\|[-:\s|]+\|$", _ln.strip()):
+                        continue
+                    _cs = [c.strip() for c in _ln.strip().strip("|").split("|")]
+                    if len(_cs) >= 2:
+                        _v = _cs[1].replace("%", "").replace("％", "").strip()
+                        if re.match(r"^\d+(\.\d+)?$", _v):
+                            _vals.append(float(_v))
+                if len(_vals) >= 2 and abs(sum(_vals) - 100) > 0.5:
+                    _msg = f"占比列加总 {sum(_vals):.1f}% ≠ 100%（可能是基数不一致）"
+                    print(f"  {NG} 口径问题：{_msg}")
+                    oc_bad.append(_msg)
+            # ② 同一张表内月/年混列（警告，不拦）
+            if re.search(r"/月|每月|月度", _blk) and re.search(r"/年|每年|年度|全年", _blk):
+                print(f"  {WARN} 同一张表内同时出现月/年口径，未标明换算方式")
+                WARNS.append("同一张表内月/年口径混用 —— 请标明换算或拆表")
+
     items = data.get("items") or []
     if not items:
         print(f"{NG} 預算表為空（items 沒有內容）。")
@@ -182,9 +242,12 @@ def main():
 
     print("-" * 64)
     print(f"  {'分項加總':<24} {s:>12,.2f}")
+    if WARNS:
+        for _w in WARNS:
+            print(f"{WARN} {_w}")
 
     total = data.get("total")
-    failed = False
+    failed = bool(oc_bad)      # 口徑問題也算失敗（R2-9）
 
     if total is None:
         print(f"  {'表內合計':<24} {'(未提供)':>12}")

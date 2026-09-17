@@ -86,8 +86,33 @@ BANNED_DEFAULT = [
     "保本收益", "保本理財", "保本理财", "保收益", "穩賺", "稳赚",
     "零風險", "零风险", "穩賺不賠", "稳赚不赔",
 ]
+# ⛔ 硬錯誤級違規詞（2026-09-17 新增，R2 合規視角第 1 條）：
+#    「疑似違規用語」原本**全部只判警告** —— 而廣告法第九條絕對化用語、化妝品醫療功效宣稱
+#    是**罰款級紅線**，跟「建議補案例」同級是不對的。這裡把它們升為硬錯誤。
+#    另外原表缺了美妝高頻違規詞（祛痘／美白／藥妝／醫美級… ）—— 一併補上。
+BANNED_HARD = [
+    # 廣告法第九條：絕對化用語
+    "最好", "最佳", "最便宜", "最低價", "最低价", "最強", "最强", "第一品牌", "銷量第一",
+    "销量第一", "國家級", "国家级", "國家級產品", "唯一", "獨一無二", "独一无二", "極致",
+    "极致", "頂級", "顶级", "最優", "最优", "史上最", "絕無僅有", "绝无仅有", "首選",
+    "首选", "領導品牌", "领导品牌", "馳名商標", "驰名商标", "100%有效", "100%見效",
+    "百分百有效", "百分百見效", "全網最低", "全网最低",
+    # 化妝品醫療功效宣稱（普通化妝品不得宣稱醫療功效）
+    "治療", "治疗", "治癒", "治愈", "根治", "痊癒", "痊愈", "包治", "藥到病除", "药到病除",
+    "特效", "療效", "疗效", "消炎", "殺菌", "杀菌", "抗菌", "除菌", "抗敏", "祛疤", "生髮",
+    "生发", "豐胸", "丰胸", "減肥", "减肥", "溶脂", "藥妝", "药妆", "醫美級", "医美级",
+    "醫學護膚品", "医学护肤品", "速效", "一洗白", "永久", "無副作用", "无副作用",
+    # 美妝常見違規宣稱（R2 補）
+    "祛痘", "祛斑", "美白", "去黑眼圈", "祛眼袋", "抗皺", "抗皱", "除蟎", "除螨", "脫敏",
+    "脱敏", "激素", "排毒",
+]
+
 # 允許出現在「禁用詞表」章節內（那是在說「不能說」）
-BANNED_CONTEXT_SAFE = ["禁用詞", "禁用词", "禁用", "不能說", "不能说", "紅線", "红线", "不得", "禁止"]
+#    ⚠️ 2026-09-17 收窄（R2 合規視角第 3 條）：原表含「不得／禁止」——
+#       那是正常公文高頻詞（「價格不得低於」），命中就挖掉**前後各 2 行**，
+#       會讓附近真正的違規詞合法逃逸（系統性盲區）。改為只認「明確在講禁用詞表」的標記，
+#       且豁免範圍從 ±2 行收到 ±1 行。
+BANNED_CONTEXT_SAFE = ["禁用詞", "禁用词", "不能說", "不能说", "紅線詞", "红线词"]
 
 # 財務／統計語境白名單：命中則從掃描文本挖掉
 # （例：「保本單量」是財務術語，不是金融產品的「保本」承諾 —— 不豁免會一直誤報）
@@ -173,11 +198,15 @@ def main():
         warnings.append(f"全文僅 {_chars} 字 —— 交付稿通常遠不止此，請確認不是空殼稿")
 
     # 1b) composer 骨架占位符殘留 —— 硬錯誤（未填完的骨架不得交付）
+    # ⚠️ 2026-09-17 改 0 容忍（R2 合規視角第 9 條）：原閾值「<3 視為已填完」——
+    #    但官方「不得留空」是 **0 容忍**，且 delivery_check 的 PLACEHOLDER_HARD 早已 0 容忍，
+    #    兩處口徑不一致。留 1–2 處也能過 selfcheck ＝ 把漏洞開在自檢最該嚴的地方。
     fill_cnt = len(re.findall(r"【填】", text))
     if not quiet:
-        print(f"  {'✅' if fill_cnt < 3 else NG} composer 占位符【填】殘留：{fill_cnt} 處（<3 視為已填完）")
-    if fill_cnt >= 3:
-        hard_errors.append(f"方案殘留 {fill_cnt} 處 composer 占位符【填】 —— 骨架未填完，不得交付")
+        print(f"  {'✅' if fill_cnt == 0 else NG} composer 占位符【填】殘留：{fill_cnt} 處（0 容忍）")
+    if fill_cnt >= 1:
+        hard_errors.append(f"方案殘留 {fill_cnt} 處 composer 占位符【填】 —— 骨架未填完，不得交付"
+                           f"（占位符為 0 容忍：官方「不得留空」不給額度）")
 
     # 2) 交付自檢單（協議 3：可寫進文檔附件，也可只在聊天回覆輸出 → 缺失僅警告，不攔）
     has_checklist = ("自檢單" in text or "自检单" in text)
@@ -256,21 +285,30 @@ def main():
         if in_code:
             safe_idx.add(i)
             continue
-        if any(c in ln for c in BANNED_CONTEXT_SAFE):
-            for j in range(max(0, i - 2), min(len(lines), i + 3)):
+        if any(c in ln for c in BANNED_CONTEXT_SAFE) or ln.strip().startswith(("- 禁用", "| 禁用", "- 不能")):
+            for j in range(max(0, i - 1), min(len(lines), i + 2)):   # ±1 行（原 ±2）
                 safe_idx.add(j)
     scan_text = "\n".join(ln for i, ln in enumerate(lines) if i not in safe_idx)
     # 套用財務／統計語境白名單（避免「保本單量」這類術語誤報）
     for pat in BANNED_WHITELIST_PATTERNS:
         scan_text = re.sub(pat, "", scan_text)
     found = sorted({b for b in banned if b and b in scan_text})
-    if found:
-        for b in found:
+    hard_found = sorted({b for b in BANNED_HARD if b and b in scan_text})
+    if hard_found and not quiet:
+        print(f"  {NG} ⛔ 硬紅線違規詞 {len(hard_found)} 個：{'、'.join(hard_found[:12])}")
+    if hard_found:
+        hard_errors.append(
+            f"廣告法／化妝品宣稱硬紅線：{'、'.join(hard_found[:12])}"
+            + ("…" if len(hard_found) > 12 else "")
+            + "　→ 絕對化用語與醫療功效宣稱是罰款級紅線，改成可核查的功能性表述。")
+    soft = [b for b in found if b not in hard_found]
+    if soft:
+        for b in soft:
             if not quiet:
                 print(f"  {WARN} 疑似違規用語：「{b}」")
-        warnings.append(f"疑似違規用語 {len(found)} 個：{'、'.join(found[:12])}"
-                        + ("…" if len(found) > 12 else ""))
-    elif not quiet:
+        warnings.append(f"疑似違規用語 {len(soft)} 個：{'、'.join(soft[:12])}"
+                        + ("…" if len(soft) > 12 else ""))
+    if not found and not quiet:
         print(f"  {OK} 未發現預設禁用詞")
 
     # 7) 核心方法論要素（2026-09-16 新增：把「好方案的三個特徵」變成機械校驗）
@@ -976,6 +1014,140 @@ def main():
                   f"{'是' if '不可移植' in _txt else '否'}")
         if not _ok:
             hard_errors.append("渠道只是「换名字」—— 5.1 表必须有「不可移植元素」列，且每渠道至少 1 个。")
+
+    # ── 【16】合規紅線與量化可驗（2026-09-17 隨 R2 一起加）
+    #    ⚠️ 本關的很多要求屬「**完整版方案才該有**」。今天已經**連續四次**因為
+    #       新硬關無條件生效而誤傷速覽類快案（smoke_test 的標杆稿）：
+    #         ① `8a 為什麼這麼做須含實質`  ② `15g 議題樹`  ③ `16f 敏感性`  ④ `16g KPI 頻率/責任人`
+    #       所以不再逐次打補丁，改成一個顯式助手 —— 新加的「完整版要求」一律走它。
+    def _hard_if_full(msg):
+        """完整版才判硬錯誤；速覽類快案降為警告。（判據：_is_full_plan）"""
+        if _is_full_plan:
+            hard_errors.append(msg)
+        else:
+            warnings.append(msg + "（速覽類快案可忽略；若本案其實是完整版請補）")
+
+    if not quiet:
+        print("\n【16】合規紅線與量化可驗（個人信息／文號／偏離值／可證偽／因果／敏感性）")
+
+    # 16a 個人信息紅線（R2-18）
+    _pid = re.findall(r"\b1[3-9]\d{9}\b", body)
+    _idc = re.findall(r"\b\d{17}[\dXx]\b", body)
+    if _pid or _idc:
+        if not quiet:
+            print(f"  {NG} 疑似個人信息：手機號 {len(_pid)} 處、身份證號 {len(_idc)} 處")
+        hard_errors.append(f"疑似出現個人信息（手機號 {len(_pid)}／身份證 {len(_idc)}）—— "
+                           f"數據合規紅線，交付前必須刪除或脫敏。")
+    elif not quiet:
+        print(f"  {OK} 未見手機號／身份證號")
+
+    # 16b G 端政策文號（R2-16）
+    if re.search(r"政策依据|政策依據", body):
+        _doc_no = re.findall(r"〔\s*20\d{2}\s*〕\s*第?\d+\s*號?号?|國發|国发|國辦發|国办发", body)
+        if not _doc_no:
+            if not quiet:
+                print(f"  {NG} G 端政策依據：未見任何公文文號（〔20XX〕第 N 號／國發 等）")
+            hard_errors.append("政策依據章沒有公文文號 —— 寫「依據國家相關政策」等於沒依據，"
+                               "評審第一關即出局。需寫到「文件名稱＋文號＋具體條款」。")
+        elif not quiet:
+            print(f"  {OK} 政策文號：命中 {len(_doc_no)} 處")
+
+    # 16c 投標偏離表響應值（R2-17）
+    if re.search(r"商務響應偏離表|商务响应偏离表", body):
+        _rows = [r for r in re.findall(r"(?m)^\|.*響應.*\|.*$|^\|.*响应.*\|.*$", body)]
+        _resps = re.findall(r"(完全響應|完全响应|正偏離|正偏离|負偏離|负偏离)", body)
+        if not _resps:
+            if not quiet:
+                print(f"  {NG} 投標偏離表：未見「完全響應／正偏離／負偏離」的響應判定")
+            hard_errors.append("商務響應偏離表沒寫響應判定 —— 每條招標要求必須標"
+                               "「完全響應／正偏離／負偏離」，負偏離還需給補救說明。")
+        elif not quiet:
+            print(f"  {OK} 投標偏離表：響應判定 {len(_resps)} 處"
+                  f"（負偏離 {sum(1 for x in _resps if '負' in x or '负' in x)} 處）")
+
+    # 16d 假設可證偽（R2-1）
+    _htab = re.search(r"(?m)^\|\s*H#.*$", body)
+    if _htab:
+        _rows = [r for r in re.findall(r"(?m)^\|\s*H\d+.*$", body)]
+        _weak = [r for r in _rows
+                 if not re.search(r"若|如果|一旦|可驗證|可验证|驗證方式|验证方式|數據截止|数据截止", r)]
+        if not quiet:
+            print(f"  {OK if not _weak else NG} 假設可證偽：{len(_rows)} 行，其中 {len(_weak)} 行看不出證偽條件")
+        if _weak:
+            hard_errors.append(
+                f"{len(_weak)} 條假設看不出「怎麼被證偽」——寫「用戶喜歡新品」這種不可證偽的假設"
+                f"不算假設驅動。每條須能寫出「若拿到什麼，就說明我錯了」。")
+
+    # 16e 相關當因果（R2-10）
+    _causal_claims = []
+    for _m in re.finditer(r"(帶動|带动|帶來|带来|提升|拉動|拉动)[^。]{0,15}?\d+(\.\d+)?\s*[%％]", body):
+        _s = body[max(0, _m.start() - 20):_m.end() + 10]
+        if not re.search(r"較|较|vs|VS|基期|對照|对照|前提|假設|假设|預估|预估", _s):
+            _causal_claims.append(_s.replace("\n", " ")[:36])
+    if _causal_claims:
+        if not quiet:
+            print(f"  {WARN} 疑似「相關當因果」{len(_causal_claims)} 處（無基期／對照／前提）")
+            for _c in _causal_claims[:3]:
+                print(f"       ⚠ {_c}…")
+        warnings.append(f"疑似把相關當因果 {len(_causal_claims)} 處 —— 效果類數字須帶"
+                        f"「較／基期／對照／前提」，否則只是願望：{'；'.join(_causal_claims[:2])}")
+    elif not quiet:
+        print(f"  {OK} 效果類數字未見裸因果句")
+
+    # 16f 敏感性分析（R2-3）
+    #    ⚠️ 2026-09-17 第三次踩同一个坑：新加的硬关又误伤了**速览类快案**
+    #       （smoke_test 的标杆稿 —— 便利店开学季快案）。
+    #       前两次分别是「议题树」（15g）与「为什么这么做须含实质」（8a）。
+    #       → 固化成规律，不再逐次打补丁：
+    #         **凡是「完整版才该有」的要求，一律先判 `_is_full_plan`；
+    #           速览类快案只提醒、不判硬错误。**
+    #         判据：完整版＝同时有「现状分析／策略／定位与口径／预算明细」四章。
+    if re.search(r"盈虧線|盈亏线|保本", body):
+        _sens = re.search(r"樂觀[\s\S]{0,300}?悲觀|乐观[\s\S]{0,300}?悲观", body)
+        if _sens:
+            if not quiet:
+                print(f"  {OK} 敏感性分析：命中三档模式")
+        else:
+            if not quiet:
+                print(f"  {'❌' if _is_full_plan else WARN} 有盈亏线但无三档敏感性"
+                      + ("（完整版强制）" if _is_full_plan else "（速览类快案可忽略）"))
+            _hard_if_full("有盈亏线却没有敏感性分析 —— 单点盈亏线是假精确；"
+                          "关键结论须给乐观／基准／悲观三档。")
+    elif not quiet:
+        print(f"  {INFO} 未見盈虧線，16f 未生效")
+
+    # 16g KPI 的「观测频率」与「谁来测」（R2-5）
+    #    ⚠️ 没有频率与责任人的 KPI ＝ 没人会去看的指标。
+    _kpi_hdr = re.search(r"(?m)^\|[^\n]*KPI[^\n]*\|\s*$", body)
+    if _kpi_hdr:
+        _h = _kpi_hdr.group(0)
+        _has_freq = bool(re.search(r"頻率|频率|每日|每周|每月|多久", _h))
+        _has_owner = bool(re.search(r"誰|谁|負責|负责|盯|觀測人|观测人", _h))
+        if not quiet:
+            print(f"  {OK if (_has_freq and _has_owner) else NG} KPI 表：频率列 "
+                  f"{'有' if _has_freq else '缺'}、责任人列 {'有' if _has_owner else '缺'}")
+        if not (_has_freq and _has_owner):
+            _hard_if_full(
+                "KPI 表缺「观测频率」或「谁来测」—— 没有频率与责任人的指标没人会去看，"
+                "等于没有指标。（表头需含 频率/多久 与 谁/负责 两类列）")
+    else:
+        warnings.append("未找到 KPI 表头，16g 未生效")
+
+    # 16h 数字三要素（来源／口径／时点）（R2-4）—— 先只警告，不拦
+    _nums = re.findall(r"[^\n。；]{0,30}?\d+(?:\.\d+)?\s*(?:%|％|元|万元|萬)", body)
+    _nu = [x for x in _nums if not re.search(r"预算|分項|分项|行動|行动|合計|合计|【填】|占位", x)]
+    if _nu:
+        _ok_n = [x for x in _nu
+                 if re.search(r"來源|来源|据《|據《|來自|来自|後台|后台|年報|年报|問卷|问卷|"
+                              r"n\s*=|我方測算|我方测算|假設|假设|估算|口徑|口径", x)]
+        _rate = len(_ok_n) / len(_nu)
+        if not quiet:
+            print(f"  {OK if _rate >= 0.8 else WARN} 数字三要素（来源／口径／时点）："
+                  f"{len(_ok_n)}/{len(_nu)} = {_rate:.0%}（建议 ≥80%）")
+        if _rate < 0.8:
+            warnings.append(
+                f"数字三要素覆盖率 {_rate:.0%}（{len(_ok_n)}/{len(_nu)}）—— "
+                f"裸数字（无来源的 %、金额）会被客户追问。建议补「来源／口径／时点」。")
 
     # ── 結論
     print("\n" + "=" * 64)

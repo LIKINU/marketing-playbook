@@ -153,7 +153,9 @@ def main():
                 sys.exit(1)
 
     # ⑤ 深度診斷（只診斷）
-    run("depth_check.py", [a.plan], STEPS[4][0])
+    # depth_check 默认只诊断；--strict-delivery 时才对三项量化硬指标拦（R2-11）
+    _dep_args = [a.plan] + (["--strict"] if a.strict_delivery else [])
+    run("depth_check.py", _dep_args, STEPS[4][0])
 
     # ⑥ 出稿
     docx_args = [a.plan, "-o", a.out, "--rules", a.rules, "--title", a.title]

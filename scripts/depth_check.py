@@ -1037,11 +1037,14 @@ def check_repeats(lines, text):
 # ==========================================================================
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
-        print("用法: python depth_check.py <plan.md> [--quiet]")
-        print("  只診斷、不阻攔出稿（退出碼一律 0，除非腳本自身出錯=2）")
+        print("用法: python depth_check.py <plan.md> [--quiet] [--strict]")
+        print("  默认只診斷、不阻攔出稿（退出碼一律 0，除非腳本自身出錯=2）")
+        print("  --strict：**仅对三项量化硬指标**（KPI 预警线 0%／风险条目 0／数字密度过低）")
+        print("            返回退出碼 1 —— 其余维度维持「只提示」。出稿前那一次建议挂上。")
         sys.exit(0)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     quiet = "--quiet" in sys.argv
+    strict = "--strict" in sys.argv
     if not args:
         print("用法: python depth_check.py <plan.md> [--quiet]")
         sys.exit(1)
@@ -1098,8 +1101,16 @@ def main():
             for w in WARNS:
                 print(f"   · {w}")
         print("\n→ 要不要按以上提示加厚，**由你（或用戶）決定**：")
-        print("   本檢查不設門檻、不阻攔出稿；羅森案原版（精煉版）同樣會有這些提示。")
+        print("   本檢查默認不設門檻、不阻攔出稿；羅森案原版（精煉版）同樣會有這些提示。")
         print(f"   （本次 {passed}/{len(dims)} 個維度達標）")
+        # ⚠️ 2026-09-17（R2 數據科學視角第 11 條）：depth_check 原本「退出碼一律 0」，
+        #    于是「KPI 无预警线」「风险 0 条」这类**量化硬伤可以带着 ❌ 交付**，
+        #    校验沦为参考意见。--strict 只对三项量化硬指标拦，其余仍只提示。
+        if strict and HARD:
+            print(f"{NG} --strict：{len(HARD)} 項量化硬指標未達標 —— 拒絕交付。")
+            for x in HARD[:6]:
+                print(f"   · {x}")
+            sys.exit(1)
         sys.exit(0)
 
     print(f"{OK} 深度校驗通過（{passed}/{len(dims)} 個維度達標，硬指標 0 項未達標）。")

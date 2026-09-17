@@ -25,6 +25,7 @@
 """
 import argparse
 import fnmatch
+import io
 import json
 import os
 import re
@@ -49,6 +50,10 @@ DEFAULT_MANIFEST = {
          "glob": "*承诺*|*授权*", "必需": True, "已交": False},
         {"名称": "宣传合规性自查说明（单独提交）",
          "glob": "*自查*|*合规*", "必需": True, "已交": False},
+        # ⚠️ 2026-09-17 补（R2 合规视角第 4 条）：官方红线要求单独提交《AI 使用说明》，
+        #    而内置清单里**根本没有这一项** —— 缺件永远不会被发现。
+        {"名称": "AI 使用说明（单独提交，须含工具名称与使用范围）",
+         "glob": "*AI*|*人工智能*", "必需": True, "已交": False},
         {"名称": "设计作品效果图/主视觉", "glob": "*.png|*.jpg|*.jpeg|*.ai|*.psd",
          "必需": False, "已交": False},
     ],
@@ -184,6 +189,72 @@ def check_cover(paras, allow):
     return head, facts
 
 
+# ── 正文匿名扫描（R2 合规视角第 2 条）──
+#   官方（校园赛／政企申报）：「正文不得出现团队成员姓名、学号、学校、指导教师，
+#   **违反取消参赛资格**」。原实现只查封面 6 段（COVER_FORBIDDEN），正文零扫描。
+#   难点：正文里出现「大学」多半是**别人家的大学**（产学研网络／对标案例），
+#   所以必须带上下文豁免，否则一份完全合规的稿会被判违规。
+ANON_WORDS = ["指导教师", "指导老师", "指導教師", "导师：", "導師：", "队长：", "隊長：",
+              "组员：", "組員：", "组别：", "學號", "学号"]
+ANON_SAFE = ["产学研", "產學研", "对标", "對標", "参考", "參考", "案例", "承办", "承辦",
+             "主办", "主辦", "合作院校", "白皮书", "白皮書"]
+
+
+def anon_scan(text):
+    """回傳 [问题描述...]。"""
+    facts = []
+    for ln in text.split("\n"):
+        safe = any(x in ln for x in ANON_SAFE) or "《" in ln
+        for w in ANON_WORDS:
+            if w in ln:
+                facts.append(f"正文出现身份词「{w}」：{ln.strip()[:40]}")
+        if not safe:
+            for m in re.finditer(r"(?:大学|大學|学院|學院|高等专科)", ln):
+                facts.append(f"正文出现院校名（非对标语境）：{ln.strip()[:40]}")
+                break
+        if "学号" in ln or "學號" in ln:
+            if re.search(r"\d{6,14}", ln):
+                facts.append(f"正文疑似出现学号数字：{ln.strip()[:40]}")
+    return facts[:12]
+
+
+def check_declaration(path):
+    """声明件内容校验（R2 合规视角第 4 条）：
+    原实现只做 glob 文件名匹配 —— **空文件也算「已交」**。AI 使用说明是官方红线的
+    「单独提交件」，必须真的写清「工具名称 + 使用范围」。"""
+    facts = []
+    base = os.path.basename(path).lower()
+    txt = ""
+    if base.endswith(".docx"):
+        try:
+            import docx
+            d = docx.Document(path)
+            txt = "\n".join(p.text for p in d.paragraphs)
+            for tb in d.tables:
+                for r in tb.rows:
+                    txt += "\n" + " | ".join(c.text for c in r.cells)
+        except Exception as e:
+            return [f"声明件读取失败（{type(e).__name__}）—— 无法校验内容，请人工看一遍"]
+    elif base.endswith((".md", ".txt")):
+        try:
+            txt = io.open(path, encoding="utf-8").read()
+        except Exception as e:
+            return [f"声明件读取失败（{type(e).__name__}）"]
+    else:
+        return []
+    if len(re.sub(r"\s", "", txt)) < 50:
+        facts.append(f"声明件内容过短（{len(re.sub(chr(92)+'s','',txt))} 实字）—— 疑似空文件")
+    if "AI" in os.path.basename(path) or "人工智能" in os.path.basename(path):
+        has_tool = bool(re.search(r"ChatGPT|GPT|Claude|Kimi|豆包|文心|通义|Copilot|DeepSeek|"
+                                  r"Midjourney|即梦|可灵|元宝|智谱|Gemini", txt))
+        has_scope = bool(re.search(r"使用(的)?(范围|環節|环节|情况|情況)|用于|用於", txt))
+        if not has_tool:
+            facts.append("《AI 使用说明》没写**工具名称**（官方要求注明工具名称）")
+        if not has_scope:
+            facts.append("《AI 使用说明》没写**使用范围/环节**（官方要求注明使用范围）")
+    return facts
+
+
 def check_name(fname, pattern):
     stem = os.path.splitext(os.path.basename(fname))[0]
     facts = []
@@ -259,22 +330,32 @@ def main():
     if not docxes:
         print(f"  {WARN} 目錄裡沒有 .docx，跳過封面與佔位符檢查")
     else:
-        target = max(docxes, key=lambda f: os.path.getsize(os.path.join(a.dir, f)))
-        paras, body = docx_text(os.path.join(a.dir, target))
-        if paras is None:
-            print(f"  {WARN} 缺 python-docx，跳過封面檢查（pip install python-docx）")
-        else:
-            cover_paras, cover_facts = check_cover(paras, man.get("封面要素") or [])
+        # ⚠️ 2026-09-17 改（R2 合規視角第 8 條）：原实现只查**最大的那一个 docx** ——
+        #    多份交付件时（主报告 + 附件说明）其余文件完全不检，占位符与封面禁项可藏在第二份里。
+        #    改成逐个检查。
+        allow = man.get("封面要素") or []
+        for target in docxes:
+            paras, body = docx_text(os.path.join(a.dir, target))
+            if paras is None:
+                print(f"  {WARN} 缺 python-docx，跳過封面檢查（pip install python-docx）")
+                break
+            cover_paras, cover_facts = check_cover(paras, allow)
             print(f"  受檢檔案：{target}")
-            print(f"  封面段落：" + " ｜ ".join(cover_paras[:4]))
-            allow = man.get("封面要素") or []
-            print(f"  允許要素：{'、'.join(allow) if allow else '（未指定，只查禁項）'}")
+            print(f"    封面段落：" + " ｜ ".join(cover_paras[:4]))
             if cover_facts:
                 for f in cover_facts:
-                    print(f"  {NG} {f}")
+                    print(f"    {NG} {f}")
                     fail.append(f)
             else:
-                print(f"  {OK} 封面未發現多餘字段")
+                print(f"    {OK} 封面未發現多餘字段")
+            # 正文匿名扫描（一票废标项）
+            anon = anon_scan(body)
+            if anon:
+                for x in anon[:6]:
+                    print(f"    {NG} 匿名红线：{x}")
+                fail.append(f"{target} 正文匿名红线 {len(anon)} 处 —— 官方「违反取消参赛资格」")
+            else:
+                print(f"    {OK} 正文未見身份詞／院校名（非對標語境）")
 
     # ③ 文件名
     print("\n【3】文件名規範")
@@ -299,22 +380,38 @@ def main():
 
     # ④ 佔位符殘留
     print("\n【4】佔位符／未完成標記掃描")
-    if docxes:
-        target = max(docxes, key=lambda f: os.path.getsize(os.path.join(a.dir, f)))
+    for target in docxes:
         _, body = docx_text(os.path.join(a.dir, target))
-        if body:
-            hard = {t: body.count(t) for t in PLACEHOLDER_HARD if t in body}
-            soft = {t: body.count(t) for t in PLACEHOLDER_WARN if t in body}
-            if hard:
-                print(f"  {NG} {target} 殘留模板佔位符 {len(hard)} 種："
-                      + "、".join(f"{k}×{v}" for k, v in hard.items()))
-                fail.append(f"交付稿殘留模板佔位符：{'、'.join(hard)}")
-            if soft:
-                print(f"  {WARN} {target} 出現 {len(soft)} 種「未完成」字樣（可能是主動聲明，"
-                      f"也可能真沒寫完，需人工看一眼）："
-                      + "、".join(f"{k}×{v}" for k, v in soft.items()))
-            if not hard and not soft:
-                print(f"  {OK} {target} 未見佔位符——稿子是真寫完的")
+        if not body:
+            continue
+        hard = {t: body.count(t) for t in PLACEHOLDER_HARD if t in body}
+        soft = {t: body.count(t) for t in PLACEHOLDER_WARN if t in body}
+        if hard:
+            print(f"  {NG} {target} 殘留模板佔位符 {len(hard)} 種："
+                  + "、".join(f"{k}×{v}" for k, v in hard.items()))
+            fail.append(f"{target} 殘留模板佔位符：{'、'.join(hard)}")
+        if soft:
+            print(f"  {WARN} {target} 出現 {len(soft)} 種「未完成」字樣（可能是主動聲明，"
+                  f"也可能真沒寫完，需人工看一眼）："
+                  + "、".join(f"{k}×{v}" for k, v in soft.items()))
+        if not hard and not soft:
+            print(f"  {OK} {target} 未見佔位符——稿子是真寫完的")
+
+    # 声明件内容校验（R2-15b）
+    print("\n【5】聲明件內容（不能只認檔名）")
+    decl_files = [f for f in files
+                  if re.search(r"AI|人工智能|承诺|承諾|授权|授權|自查|合规|合規", f)
+                  and f.lower().endswith((".docx", ".md", ".txt"))]
+    if not decl_files:
+        print(f"  {WARN} 未見聲明件（AI 使用說明／原創承諾／合規自查）—— 官方要求單獨提交")
+    for f in decl_files:
+        df = check_declaration(os.path.join(a.dir, f))
+        if df:
+            for x in df:
+                print(f"  {NG} {f} —— {x}")
+                fail.append(f"{f}：{x}")
+        else:
+            print(f"  {OK} {f}　　内容非空且要素齐（工具名称/使用范围已核）")
 
     print("\n" + "=" * 68)
     if fail:

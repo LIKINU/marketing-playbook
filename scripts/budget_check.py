@@ -167,25 +167,66 @@ def main():
     _ue_missing = []
     if md is not None and not data.get("unit_economics"):
         _ue = {}
-        # ⚠️ 2026-09-17 修 BUG（投资人视角第 1 条，实测会崩）：
-        #   原写法 `_pat + r"[^\n]{0,20}?(\d+)"` —— **捕获组在第三个分支里**，
-        #   一旦文字被前两个分支（单客获取成本／生命周期价值）命中，group(1) 就是 None，
-        #   float(None) → TypeError，脚本 exit 2。改成**整组加括号**，三个分支都带捕获。
-        for _k, _pat in (("cac", r"(?:单客获取成本|单客获取成本|CAC)"),
-                         ("ltv", r"(?:生命周期价值|生命周期价值|LTV)"),
-                         ("payback", r"(?:回本周期|回本周期|回本周期\(月\))")):
-            _m = re.search(_pat + r"[^\n]{0,40}?(\d+(?:\.\d+)?)", md)
-            if _m and _m.group(1):
-                _ue[_k] = float(_m.group(1))
-        # 读不到 CAC 或 LTV → 报出来（原先静默跳过，等于「没算」也算过）
-        # ⚠️ 2026-09-19 修（A 批 · 投资人视角第 1 条）：原先**只印一行 NG 就走了**，
-        #    `failed` 根本没被置位 → 单位经济缺失**不拦出稿**，等于「没算也算过」。
-        #    这里先记标志，等 `failed` 定义处再并进去（它在本段之后才定义）。
+        # ⚠️⚠️ 2026-09-19 修**高危** BUG（六体系逐行核对 · 体系3 #1 挖出）：
+        #   原实现是「全文正则：关键词后面取第一个数字」，于是**读到的是骨架自己注释里的约束值** ——
+        #   骨架写着「首单 ROI…（**允许 <1**，但要写明最长容忍回本月数）」「LTV÷CAC **≥ 3**」
+        #   「单店投入回本月数 **> 6** 个月」「CAC 回本周期的警戒线是 **≤12** 个月」，
+        #   实测抽出 `{'cac': 1.0, 'ltv': 3.0, 'payback': 12.0}` —— **全是注释里的阈值，不是本方案的值**。
+        #   后果：`_ue_missing` 恒空 → 「缺 CAC/LTV → 不出稿」这道**硬关从来没生效过**，
+        #        而且会印出一行「从成稿回读到单位经济：{...}」**让人以为复算过了**。
+        #   → 修法两层：
+        #     ① 首选**从「单位经济」表的「数值」列读**（那才是填稿人该填的格子），
+        #        且要求该行第 2 格是**公式**（含 ×÷*/=＋-），以排除 14.2 分渠道表（列义不同）；
+        #     ② 回退到全文正则时，**跳过注释/标题行**，并跳过含约束符（≥≤<> 与「允许/容忍/警戒/上限」）
+        #        的行 —— **约束句里的数字永远不是本方案的取值**。
+        for _m in re.finditer(r"(?m)^\|([^|\n]+)\|([^|\n]+)\|([^|\n]+)\|", md):
+            _k = _m.group(1).strip()
+            _formula = _m.group(2)
+            _v = _m.group(3).strip()
+            _key = None
+            if re.search(r"CAC|单客获取成本", _k):
+                _key = "cac"
+            elif re.search(r"LTV|生命周期价值", _k):
+                _key = "ltv"
+            elif re.search(r"回本", _k):
+                _key = "payback"
+            elif re.search(r"毛利率", _k):
+                _key = "gross_margin"
+            elif re.search(r"客单价", _k):
+                _key = "aov"
+            if not _key or _key in _ue:
+                continue
+            if not re.search(r"[×÷*/=＋+\-−]", _formula):
+                continue                      # 第 2 格不是公式 → 不是「指标｜公式｜数值」这张表
+            _num = re.fullmatch(r"\**([0-9]+(?:\.[0-9]+)?)\**\s*(?:元|万元|万|%|％|个月|月|天)?",
+                                _v.replace(" ", "").replace("【填】", ""))
+            if _num and "【填】" not in _v and _v.strip():
+                _ue[_key] = float(_num.group(1))
+        if len(_ue) < 5:
+            for _k, _pat in (("cac", r"(?:单客获取成本|CAC)"),
+                             ("ltv", r"(?:生命周期价值|LTV)"),
+                             ("payback", r"回本周期"),
+                             ("gross_margin", r"毛利率"),
+                             ("aov", r"客单价")):
+                if _k in _ue:
+                    continue
+                for _ln in md.split("\n"):
+                    _s = _ln.strip()
+                    if _s.startswith((">", "#", "|")):
+                        continue
+                    if re.search(r"[≥≤<>]|允许|容忍|警戒|上限|不低|不超|超过|至少|以内", _s):
+                        continue
+                    _m = re.search(_pat + r"[^\n]{0,20}?([0-9]+(?:\.[0-9]+)?)", _s)
+                    if _m:
+                        _ue[_k] = float(_m.group(1))
+                        break
+        # 读不到 → 报出来（原先静默跳过，等于「没算」也算过）
         _ue_missing = []
-        for _need in ("cac", "ltv"):
+        for _need, _cn in (("cac", "CAC"), ("ltv", "LTV"), ("gross_margin", "毛利率"),
+                           ("aov", "客单价"), ("payback", "回本周期")):
             if _need not in _ue:
-                _ue_missing.append(_need.upper())
-                print(f"  {NG} 成稿里读不到「{_need.upper()}」—— 单位经济无法复算，请补齐五项")
+                _ue_missing.append(_cn)
+                print(f"  {NG} 成稿里读不到「{_cn}」—— 单位经济无法复算，请补齐五项")
         if len(_ue) >= 2:
             data["unit_economics"] = _ue
             print(f"→ 从成稿回读到单位经济：{_ue}（将参与复算）")

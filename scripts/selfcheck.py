@@ -964,6 +964,19 @@ def main():
     def _zh(s):
         return len(re.findall(r"[\u4e00-\u9fff]", s))
 
+    # 「空/占位」判定（15f 之外、22a 与【31】共用）——
+    # ⚠️ 2026-09-19 **第三次**栽在同一处：助手定义晚于调用点 → 22a 一调 `_is_ph` 就
+    #    `UnboundLocalError`（脚本 rc=2，而不是判错）。**本仓库已三次（_hard_if_full／_tbl／_is_ph）。**
+    #    → 凡是**多个关卡共用**的助手，一律放在这里，不要写进某一关的内部。
+    _PH = re.compile(r"^(?:占位|待补|待定|待确认|TBD|Todo|N/?A)$", re.I)
+
+    def _is_ph(s):
+        s = (s or "").strip()
+        if "【填】" in s:
+            return True
+        _t2 = re.sub(r"[*\s]", "", s)
+        return (not _t2) or bool(_PH.match(_t2))
+
     # 14a 执行摘要
     _abs = next((v for k, v in _secs.items() if "执行摘要" in k or "执行摘要" in k), "")
     _n_num = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|万|单|单|人|店|次|万|万)", _abs))
@@ -1695,17 +1708,46 @@ def main():
     #
     # ⚠️ 与【21】同理：都是「骨架刚补了列/表」的判据。骨架位本轮已做齐全性总检。
     # 22a 0.1 因子表的「数据来源」列非空率（投资人视角第 5 条）
+    #
+    # ⚠️ 2026-09-19 修（六体系逐行核对 · 体系3 #5 挖出「**分母错**」）：
+    #   原实现把 0.1 节里**所有** `|` 开头行拼起来、只 `[2:]` 砍掉头两行（表头＋分隔）——
+    #   而 0.1 节里有**两张表**（五分支问题树 4 列 ＋ 四因子拆解 6 列），
+    #   于是另一张表的表头/分隔行与 5 行分支行全被当成「缺数据来源的行」→
+    #   恒为 6/11 = 55% < 90% → **完整版方案永远报硬错误**（判据自己成了噪声源）。
+    #   → 改成**逐表切块**，只在**真的有「来源」列的那张表**上算非空率，并按**列下标**取格子。
     _f01 = re.findall(r"(?ms)^#{2,3}\s*0\.1[^\n]*\n(.*?)(?=^#{2,3}\s|\Z)", body)
     if _f01:
-        _rows = [r for r in _f01[0].split("\n") if r.strip().startswith("|")][2:]
-        if _rows:
-            _has_src = [r for r in _rows if len([c for c in r.split("|") if c.strip()]) >= 6]
-            _rate = len(_has_src) / len(_rows)
+        _blks, _cur = [], []
+        for _ln in _f01[0].split("\n"):
+            if _ln.strip().startswith("|"):
+                _cur.append(_ln.strip())
+            elif _cur:
+                _blks.append(_cur)
+                _cur = []
+        if _cur:
+            _blks.append(_cur)
+        _done22a = False
+        for _blk in _blks:
+            _hdr = _blk[0]
+            _i_src = _col(_cells(_hdr), "数据来源", "来源")
+            if _i_src < 0:
+                continue
+            _rows = [r for r in _blk[1:] if "---" not in r]
+            if not _rows:
+                continue
+            _filled = [r for r in _rows if not _is_ph(_cell(_cells(r), _i_src))]
+            _rate = len(_filled) / len(_rows)
+            _done22a = True
             if not quiet:
-                print(f"  {OK if _rate >= 0.9 else NG} 0.1 因子表：带「数据来源（口径／时点）」的行 {_rate:.0%}（需 ≥90%）")
+                print(f"  {OK if _rate >= 0.9 else NG} 0.1 因子表：带「数据来源（口径／时点）」的行 "
+                      f"{_rate:.0%}（需 ≥90%，本表 {len(_rows)} 行）")
             if _rate < 0.9:
                 _hard_if_full("0.1 因子表的「数据来源（口径／时点）」列缺失或大量留空 —— "
                               "裸数字客户无法追溯，会被追问「这个 42% 哪来的」。")
+        if not _done22a:
+            if not quiet:
+                print(f"  {NG} 0.1 因子表：**没有「数据来源」列**（骨架会给，缺了就是被删了）")
+            _hard_if_full("0.1 因子表缺「数据来源（口径／时点）」列 —— 每个因子的数字都要能追到出处。")
     # 22b 目标营收 vs 四因子乘积（投资人视角第 4 条）
     _rev = re.search(r"目标营收[^\n]{0,20}?([\d,]+(?:\.\d+)?)\s*(万|亿)?", body)
     if _f01 and _rev:
@@ -2364,7 +2406,97 @@ def main():
         elif not quiet:
             print(f"  {INFO} 行业资质与边界：非受监管行业，本档未生成（走通用禁用词表）")
 
+    # 31) 内容空洞检测（2026-09-19 · 六体系逐行核对挖出的最大一类病）
+    #
+    # 【为什么要有这一关】
+    # 派 6 个独立校验员逐行核对 78 行对标维度，结果：**已落 21 / 部分 49 / 未落 8**。
+    # 而 49 条「部分」里绝大多数不是没做，而是**判据空转** —— 反例测试的做法是
+    # 「把某章节的**内容删空、只留表头/标签**，再跑 selfcheck」，结果照样 ✅：
+    #   · 「核销成本」判 `'核销成本' in 节`，而**表头就叫「核销成本合计」**；
+    #   · 「唯一对外发声口」判字符串在不在，而**骨架标签就写着这四个字**；
+    #   · 「授权起止」「安全库存线」「合法性基础」同理 —— **被自证的词就印在标签里**。
+    # 关键认识：**这不是 49 个独立缺陷，是一个共同漏洞** —— 判据查「结构有没有」，不查
+    # 「表头背后有没有东西」。与其逐关改 49 处（改完还得逐个再验），不如**一次堵住这一大类**。
+    #
+    # 【判据】整篇交付稿范围内：
+    #   ① 任何 markdown 表**数据行数为 0**（只有表头）→ 空表；
+    #   ② 任何数据行**所有单元格都是空/占位**（`-`／`—`／【填】／占位／待补／TBD）→ 空行；
+    #   ③ 任何 `- **标签**：内容` 形式的字段，**内容实字 <2**（或就是占位符）→ 空字段。
+    #   ⛔ 不适用的章节**要写「不适用」**（≥2 实字即通过），不要留空 —— 留空与「忘了写」不可区分。
+    #   ⚠️ 校准过的两处「不算空」（否则会误伤真稿，实测真标杆稿被误报 8 处）：
+    #      · `—`／`-`／`无` **算「明确地没有」**，不算空（本仓库的填写指引就写「『无／没有』是合法答案」）；
+    #        只有**真的什么都没有**与**占位符（【填】／占位／待补／TBD）**才算空。
+    #      · `- **标签**：` 后面**内容换行写在下一行**（嵌套 bullet／表）是合法格式 —— 必须往下看一行。
+    #   `_is_ph`／`_PH` 的定义已**上移到公共助手区**（`_zh` 之后）—— 22a 也要用它。
+
+    _lines31 = body.split("\n")
+    _in_fence = False
+    _hollow_tbl, _hollow_row = [], []
+    _i = 0
+    _n_tbl = 0
+    while _i < len(_lines31):
+        _s = _lines31[_i].strip()
+        if _s.startswith("```"):
+            _in_fence = not _in_fence
+            _i += 1
+            continue
+        if _in_fence or not _s.startswith("|"):
+            _i += 1
+            continue
+        # 收集一张连续的表
+        _blk = []
+        while _i < len(_lines31) and _lines31[_i].strip().startswith("|"):
+            _blk.append(_lines31[_i].strip())
+            _i += 1
+        _n_tbl += 1
+        _hdr = _blk[0] if _blk else ""
+        _data = [r for r in _blk[1:] if "---" not in r]
+        _name = _cells(_hdr)[0][:14] if _cells(_hdr) else "（无表头）"
+        if not _data:
+            _hollow_tbl.append(_name)
+            continue
+        for _r in _data:
+            _c = list(_cells(_r))
+            if _c and all(_is_ph(x) for x in _c):
+                _hollow_row.append(_name)
+                break
+
+    _hollow_fld = []
+    for _idx, _ln in enumerate(_lines31):
+        _s = _ln.strip()
+        if _s.startswith("|") or _s.startswith(">") or _s.startswith("#"):
+            continue
+        _m = re.match(r"^[ \t]*-[ \t]*\*\*[^*]{2,40}\*\*[^\n]*?[：:][ \t]*(.*)$", _ln)
+        if not _m or _zh(_m.group(1)) >= 2:
+            continue
+        # 往下看一行：内容换行写在下一行（嵌套 bullet／表）是合法格式
+        _nxt = ""
+        for _j in range(_idx + 1, len(_lines31)):
+            if _lines31[_j].strip():
+                _nxt = _lines31[_j].strip()
+                break
+        if _nxt.startswith(("-", "*", "|", ">")) or _lines31[_idx + 1].startswith((" ", "\t")):
+            continue
+        _lb = re.match(r"^[ \t]*-[ \t]*\*\*([^*]{2,40})\*\*", _ln)
+        _hollow_fld.append((_lb.group(1) if _lb else "?")[:18])
+
+    _n_hollow = len(_hollow_tbl) + len(_hollow_row) + len(_hollow_fld)
+    if not quiet:
+        print(f"  {OK if _n_hollow == 0 else NG} 内容空洞：{_n_tbl} 张表里 "
+              f"**空表 {len(_hollow_tbl)}**、**空行表 {len(_hollow_row)}**、"
+              f"**空字段 {len(_hollow_fld)}**")
+    if _n_hollow:
+        _hard_if_full(
+            f"交付稿有 {_n_hollow} 处「只有壳、没有内容」："
+            f"空表 {len(_hollow_tbl)}（{'、'.join(_hollow_tbl[:4])}）／"
+            f"有表头但整行皆空 {len(_hollow_row)}（{'、'.join(sorted(set(_hollow_row))[:4])}）／"
+            f"字段标签后无内容 {len(_hollow_fld)}（{'、'.join(_hollow_fld[:4])}）。"
+            f"**表头不是内容**：判据查的是「表头背后有没有东西」，而旧版很多关只判「表头在不在」，"
+            f"于是**把内容删空只留表头也能通过**。**不适用的章节要写「不适用」**（≥2 实字即过），"
+            f"留空与「忘了写」不可区分。")
+
     # ── 结论
+
     print("\n" + "=" * 64)
     if hard_errors:
         print(f"{NG} 自检不通过（{len(hard_errors)} 项硬错误）：")

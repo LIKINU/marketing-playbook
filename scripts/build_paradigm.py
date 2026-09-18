@@ -125,6 +125,39 @@ def render_tier(tier):
     return "\n".join(L), missing
 
 
+def render_traits():
+    """渲染「条件章节」—— 按客户特征注入的章节及其填写指引。
+
+    为什么必须渲染进范式库：这些节**不在 `SKELETON_HEADS` 里**，上面那六档渲染
+    照不到它们。若不在这里补一段，执行 AI 在范式库里**查不到该怎么填** ——
+    那就白改了：骨架给了空表、模型继续编（本仓库的坑 5）。
+    「指引写进代码」和「指引到得了执行者的眼里」是两件事，这里负责后者。
+    """
+    kw_map = dict(C.TRAIT_PATTERNS)
+    L = ["# 附 · 条件章节（**按客户特征注入，与档位无关**）\n",
+         "> 下面这几节**不挂在任何档位上** —— 看《任务规则表》里有没有对应特征，\n"
+         "> 命中即注入，与所选档位无关。原先它们只挂在某一个档位上，于是：\n"
+         "> 做连锁的 B 端客户拿不到稽核表；需要直播的客户全案没有直播章。\n"]
+    for tr, heads in P.TRAIT_HEADS.items():
+        L.append(f"\n## 特征：{tr}\n")
+        L.append(f"- **触发词**（命中任一即注入）：{'／'.join(kw_map.get(tr, []))}\n")
+        L.append(f"- **会多出这几节**：{'｜'.join(heads)}\n")
+        for h in heads:
+            g = P.GUIDE.get(h)
+            L.append(f"\n### {h}\n")
+            if not g:
+                L.append("- ⚠️ 暂无指引\n")
+                continue
+            L.append(f"- **写什么**：{g['what']}\n")
+            L.append(f"- **篇幅**：{g['size']}\n")
+            L.append(f"- **必须含**：{g['must']}\n")
+            if g.get("lines"):
+                L.append("- **关键句片段**（可直接改写套用）：\n")
+                for x in g["lines"]:
+                    L.append(f"  - {x}\n")
+    return "\n".join(L)
+
+
 def preserved_head():
     """保留既有文件头（一级标题 ＋ 自解释引用块），避免每次重生都把 file_meta 的头洗掉。
 
@@ -172,6 +205,20 @@ def main():
         sys.exit(1)
     print("\n  ✅ 六档骨架与 paradigm_data 声明完全一致（无漂移）\n")
 
+    # 条件章节的指引完整性（2026-09-19）
+    # 为什么单列一关：条件章节**不进 SKELETON_HEADS**（否则破坏上面那个静态校验），
+    # 于是它们也**不在上面那条对账里** —— 少写指引不会被任何检查发现。
+    # 而「骨架给了空表、范式库查不到填法」＝模型只能编 → 正是本仓库反复踩的坑 5。
+    _miss_trait = P.check_trait_guide()
+    if _miss_trait:
+        print(f"{NG} 条件章节缺填写指引（{len(_miss_trait)} 节）：")
+        for tr, h in _miss_trait:
+            print(f"   · [{tr}] {h}")
+        print("   处理：在 scripts/paradigm_data.py 的 GUIDE 里补上这几节的指引。")
+        sys.exit(1)
+    print(f"  ✅ 条件章节指引完整（{sum(len(v) for v in P.TRAIT_HEADS.values())} 节，"
+          f"分布在 {len(P.TRAIT_HEADS)} 个客户特征上）\n")
+
     if a.doc_map:
         write_doc_map(a.doc_map)
 
@@ -186,6 +233,9 @@ def main():
         txt, miss = render_tier(t)
         total_missing += miss
         body.append(f"# 第 {i} 档 · {t}（{P.TIER_META[t]['alias']}）\n\n{txt}\n---\n\n")
+
+    # 条件章节渲染在六个档位之后（它不属于任何一档 —— 属于客户特征）
+    body.append(render_traits() + "\n---\n\n")
 
     # 用法说明只放一次：首次生成时写，之后由 file_meta 的自解释头承担
     intro = (

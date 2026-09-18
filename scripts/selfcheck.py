@@ -384,6 +384,7 @@ def main():
         print("\n【6】禁用词扫描（只扫描非「禁用词说明」段落）")
     # 粗略：把含「禁用词/不能说/红线」的段落挖掉再扫
     lines = text.splitlines()
+    _BAN_LINE = ("禁用词", "禁语", "禁止", "红线", "不能说", "替换说法")
     safe_idx = set()
     in_code = False
     for i, ln in enumerate(lines):
@@ -394,7 +395,11 @@ def main():
         if in_code:
             safe_idx.add(i)
             continue
-        if any(c in ln for c in BANNED_CONTEXT_SAFE) or ln.strip().startswith(("- 禁用", "| 禁用", "- 不能")):
+        # ⚠️ 2026-09-19 集成测试：行级标记表原来只有「禁用词／不能说／红线词」三个词，
+        #   而新章节写的是「**本表是禁语清单**」→ **认不出来，于是它自己列出的禁语被举报**。
+        #   → 与表头规则用**同一套标记**（但去掉「不得／不能／违规」—— 这三个词在普通行文里
+        #     太常见，放在行级会过度豁免；放在**表头**上才是强语境）。
+        if any(c in ln for c in _BAN_LINE) or ln.strip().startswith(("- 禁用", "| 禁用", "- 不能")):
             for j in range(max(0, i - 1), min(len(lines), i + 2)):   # ±1 行（原 ±2）
                 safe_idx.add(j)
     # ⚠️ 2026-09-19（六体系核对 · 体系6 agent 报「空骨架自报 13 个违规词」）——
@@ -419,7 +424,11 @@ def main():
             continue
         _i += 1
 
-    _BAN_MARK = ("禁用", "禁止", "不能说", "红线", "不得", "违规后果", "违规", "违法")
+    # ⚠️ 2026-09-19 集成测试抓到：3.6「未成年人·母婴保护」的**禁语表**表头写作「项｜要求」，
+    #   里面逐条列出「替代母乳／促进长高／变聪明」→ 结果**被自己的禁词判据举报**。
+    #   → 「禁语」「替换说法」也是禁用类标记（凡表头写这两个词的，就是禁语表）。
+    _BAN_MARK = ("禁用", "禁止", "禁语", "不能说", "红线", "不得", "不能", "替换说法",
+                 "违规后果", "违规", "违法")
     _i = 0
     while _i < len(lines):
         if lines[_i].strip().startswith("|"):

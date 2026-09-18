@@ -1648,6 +1648,73 @@ def main():
             _hard_if_full(f"行动清单缺「{'／'.join(_miss)}」—— 每个要别人配合的动作，"
                           f"都要写清「从谁那里拿什么、几号给我、他不给我找谁拍板」。")
 
+    # 23) B 批：结构性改骨架后的判据（2026-09-19）
+    #
+    # ⚠️ 这一批是**新章节**（不是补列），所以判据要覆盖「节在不在 + 节里有没有东西」两层。
+    #    ⚠️ 按已知坑：节提取一律用「标题正则」（## 与 ### 都认），不用只切 ## 的 `_secs`。
+    def _sec23(*keys):
+        for _m in re.finditer(r"(?ms)^#{2,3}\s+([^\n]*)\n(.*?)(?=^#{2,3}\s|\Z)", body):
+            if any(k in _m.group(1) for k in keys):
+                return _m.group(1) + "\n" + _m.group(2)
+        return ""
+
+    # 23a 问题树：五分支 + 至少排除 3 支（战略咨询第 3 条）
+    _pt = _sec23("0.1 MECE")
+    if _pt:
+        # ⚠️ 只数**五个分支行**，不能数整节的所有行 ——
+        #   0.1 这一节里还有「主攻分支的量化拆解」那张**四因子表**，
+        #   按整节数会把 5 支 + 4 因子 + 表头算成 11 行（实测踩过）。
+        _BRANCH = ("需求端", "竞争端", "自身产品", "渠道与触达", "组织与执行")
+        _rows = [r for r in _pt.split("\n")
+                 if r.strip().startswith("|") and any(b in r.split("|")[1] for b in _BRANCH)]
+        _excl = [r for r in _rows if re.search(r"已排除|排除", r)]
+        _ok = len(_rows) >= 5 and len(_excl) >= 3
+        if not quiet:
+            print(f"  {OK if _ok else NG} 0.1 问题树：{len(_rows)} 个分支、其中 {len(_excl)} 支标了排除（需 ≥5 支、≥3 支排除）")
+        if not _ok:
+            _hard_if_full(f"0.1 问题树只有 {len(_rows)} 支、其中 {len(_excl)} 支标了排除 —— "
+                          f"**不写排除依据＝这份诊断没做过穷尽**。只写「问题就是流量不够」而不排除其他四支，"
+                          f"等于跳过了诊断（BCG 的判据正是「先证明没漏掉一整块」）。")
+    else:
+        if not quiet:
+            print(f"  {NG} 0.1 问题树：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 23b 市场盘子双算（战略咨询第 4 条 / 投资人第 3 条）
+    _mk = _sec23("市场盘子")
+    if _mk:
+        _miss = [k for k in ("自上而下", "自下而上") if k not in _mk]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 市场盘子：{'双算齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"市场盘子缺「{'／'.join(_miss)}」—— **只给一个数＝不可验证**："
+                          f"自上而下答「盘子多大」、自下而上答「你够得着多少」，两者差一个数量级说明假设有问题。")
+    else:
+        if not quiet:
+            print(f"  {NG} 市场盘子：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 23c 战略选项对比：≥3 行 + 恰好 1 行采纳（战略咨询第 1 条）
+    _so = _sec23("战略选项对比")
+    if _so:
+        _rows = [r for r in _so.split("\n") if r.strip().startswith("|")][2:]
+        _rows = [r for r in _rows if r.replace("|", "").strip()]
+        _pick = [r for r in _rows if re.search(r"✅|采纳|是\s*\|?\s*$", r)]
+        _ok = len(_rows) >= 3 and len(_pick) == 1
+        if not quiet:
+            print(f"  {OK if _ok else NG} 战略选项：{len(_rows)} 行、采纳 {len(_pick)} 行（需 ≥3 行、恰好 1 行采纳）")
+        if not _ok:
+            _hard_if_full(f"战略选项对比：{len(_rows)} 行、采纳 {len(_pick)} 行 —— "
+                          f"需要 **≥3 条互斥路线**且**恰好一行标「采纳」**。"
+                          f"只给一个方案＝无法证明「没选的那条为什么更差」。")
+    else:
+        if not quiet:
+            print(f"  {NG} 战略选项对比：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 23d 增量归因：基线 vs 净增量（战略咨询第 2 条 / 投资人第 7 条）
+    _miss23 = [k for k in ("基线", "净增量") if k not in body]
+    if not quiet:
+        print(f"  {OK if not _miss23 else NG} 增量归因：{'含基线与净增量' if not _miss23 else '缺 ' + '／'.join(_miss23)}")
+    if _miss23:
+        _hard_if_full(f"缺「{'／'.join(_miss23)}」—— 预期回报只给一个绝对值**不可证伪**："
+                      f"客户无法判断哪部分是方案挣的。要拆成「基线（不做也会自然涨）＋ 净增量（本方案带来）」，"
+                      f"并在 7.2 写清增量口径（对照组／去年同期／前后对比）。")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

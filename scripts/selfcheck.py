@@ -942,6 +942,28 @@ def main():
         else:
             warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
 
+    # 表格小工具（15f／【28】共用）—— 同样必须在所有判据之前定义。
+    def _cells(line):
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+
+    def _tbl(sec):
+        rows = [r for r in sec.split("\n") if r.strip().startswith("|")]
+        if len(rows) < 2:
+            return [], []
+        return _cells(rows[0]), [_cells(r) for r in rows[1:] if "---" not in r]
+
+    def _col(hdr, *keys):
+        for _i, _c in enumerate(hdr):
+            if any(k in _c for k in keys):
+                return _i
+        return -1
+
+    def _cell(row, i):
+        return row[i].strip() if 0 <= i < len(row) else ""
+
+    def _zh(s):
+        return len(re.findall(r"[\u4e00-\u9fff]", s))
+
     # 14a 执行摘要
     _abs = next((v for k, v in _secs.items() if "执行摘要" in k or "执行摘要" in k), "")
     _n_num = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|万|单|单|人|店|次|万|万)", _abs))
@@ -1189,6 +1211,52 @@ def main():
                   f"{'是' if '不可移植' in _txt else '否'}")
         if not _ok:
             hard_errors.append("渠道只是「换名字」—— 5.1 表必须有「不可移植元素」列，且每渠道至少 1 个。")
+        # 2026-09-19（C 批 · 体系2 #9「渠道原生真重写」）：光有「不可移植元素」列还不够 ——
+        #   原先只要这四字出现即过。补两条能判「够不够格」的：
+        #     ① 开头列 ≥8 实字，且**不得以描述词开头**（视觉／风格／调性／氛围／高级感…）；
+        #     ② 两个渠道的「形态＋开头」bigram 相似度 >0.8 ＝ 同一段内容换个渠道名。
+        _h, _rows = _tbl(_txt)
+        _i_head = _col(_h, "开头")
+        _i_form = _col(_h, "形态")
+        _i_ch = _col(_h, "渠道")
+        _DESC = r"^(视觉|风格|调性|氛围|高级感|年轻化|有质感|画面|整体|感觉|调性上)"
+        _thin, _desc = [], []
+        _pairs = []
+        for _r in _rows:
+            _hd = _cell(_r, _i_head)
+            if 0 < _zh(_hd) < 8:
+                _thin.append((_cell(_r, _i_ch), _hd))
+            elif re.match(_DESC, _hd):
+                _desc.append((_cell(_r, _i_ch), _hd))
+            _pairs.append((_cell(_r, _i_ch), _cell(_r, _i_form) + "　" + _hd))
+        _dup = []
+        for _i in range(len(_pairs)):
+            for _j in range(_i + 1, len(_pairs)):
+                _a, _b = _pairs[_i][1], _pairs[_j][1]
+                _sa = {_a[k:k + 2] for k in range(len(_a) - 1)}
+                _sb = {_b[k:k + 2] for k in range(len(_b) - 1)}
+                if _sa and _sb:
+                    _jac = len(_sa & _sb) / len(_sa | _sb)
+                    if _jac > 0.8:
+                        _dup.append((_pairs[_i][0], _pairs[_j][0], _jac))
+        if not quiet:
+            print(f"  {OK if not (_thin or _desc or _dup) else NG} 渠道原生：开头过短 {len(_thin)} 行、"
+                  f"以描述词开头 {len(_desc)} 行、跨渠道雷同 {len(_dup)} 对")
+        if _thin:
+            hard_errors.append(
+                "渠道原生：有渠道的「开头 3 秒／首屏」不足 8 实字（" +
+                "、".join(f"{c or '?'}" for c, _ in _thin[:3]) +
+                "）—— **前 3 秒是唯一一次开口的机会**，一句话说不清＝这条内容没有开头。")
+        if _desc:
+            hard_errors.append(
+                "渠道原生：有渠道的开头以**描述词**起手（" +
+                "、".join(f"{c or '?'}「{h[:14]}」" for c, h in _desc[:3]) +
+                "）—— 「视觉上／风格上／有质感」是**评价**不是台词；第一句要是能直接念出来的话。")
+        for _c1, _c2, _jac in _dup[:3]:
+            hard_errors.append(
+                f"渠道原生：{_c1 or '?'} 与 {_c2 or '?'} 的「形态＋开头」相似度 {_jac:.0%}（>80%）"
+                f"—— 这就是**同一段内容换个渠道名**。判据：把这条内容放到别的渠道会失效（不可移植元素），"
+                f"才算渠道原生。")
     else:
         if not quiet:
             print(f"  {NG} 渠道形态表：**未找到 5.1 同一母题·各渠道的不同形态**（骨架会给，缺了就是被删了）")
@@ -2012,6 +2080,142 @@ def main():
     else:
         if not quiet:
             print(f"  {NG} 变更控制与范围边界：**未找到这一节**（骨架会给，缺了就是被删了）")
+
+    # 28) C 批第一批：六条「把已给位的列接上判定」（2026-09-19）
+    #     ⚠️ 这一批**不建新章节**（除 3.4 送审与两处列），只补判据 —— 因为本仓库最大的病是
+    #        「骨架给了位、判据没接上」，而补判据的 ROI 远高于再加章节。
+    #     ⚠️ 表格小工具已上移（见 `_zh` 之后）—— 15f 在它之前执行，留在原处会 `NameError`。
+
+    # 28a So-What 全篇覆盖率（体系1 #10）
+    #     ⚠️ 校准过才敢定阈值：真标杆稿（便利店案）**92%**、未填骨架 **65%** → 门槛 70%。
+    #     ⚠️ 判据只认「段」不认「句」：骨架靠表格承载信息，逐句判会把表格全判成不合格。
+    _ACT = (r"投|上线|发布|改|换|砍|加投|删|测试|排期|拍|招|培训|发券|签约|定档|复盘|巡检|对账|"
+            r"埋点|关停|止损|降价|提价|赠|邀约|回访|落地|执行|写|设计|建|锁|核算|核对|"
+            r"备货|补货|排品|上架|下架|分配到")
+    _UNIT = (r"\d[\d,.]*\s*(元|万元|万|%|％|单|人|天|周|月|次|条|店|份|张|秒|分钟|小时|个|家|档|岁|km|公里)")
+    _ps, _cur = [], []
+    for _ln in body.split("\n"):
+        _s = _ln.strip()
+        if (not _s) or _s.startswith("#") or _s.startswith("|") or _s.startswith(">"):
+            if _cur:
+                _ps.append(" ".join(_cur))
+                _cur = []
+            continue
+        _cur.append(_s)
+    if _cur:
+        _ps.append(" ".join(_cur))
+    _judg = [x for x in _ps if _zh(x) >= 20]
+    _okj = [x for x in _judg if re.search(_ACT, x) or re.search(_UNIT, x)]
+    _cov = len(_okj) / max(len(_judg), 1)
+    if len(_judg) >= 5:          # 段数太少（速览类）不判 —— 样本不足
+        _ok28a = _cov >= 0.70
+        if not quiet:
+            print(f"  {OK if _ok28a else NG} So-What 覆盖率：{len(_okj)}/{len(_judg)} 段 = {_cov:.0%}"
+                  f"（需 ≥70%）")
+        if not _ok28a:
+            _hard_if_full(
+                f"So-What 覆盖率 {_cov:.0%}（低于 70%）—— 有 {len(_judg) - len(_okj)} 段"
+                f"**只下了判断、没接动作或数字**「所以呢」没答。逐段补：这句判断落到谁、"
+                f"做什么、看哪个数。**判据：判断句的下一句要能接得上「所以我们做 X」。**")
+
+    # 28b 制作可行性（8.8，体系2 #2）—— 骨架七列原本**一条判据都没有**
+    _pf = _sec_any("制作可行性")
+    if _pf:
+        _h, _rows = _tbl(_pf)
+        _need = ["物料", "形态", "制作方", "前置期", "硬条件", "最晚定稿日", "难度"]
+        _miss = [k for k in _need if not any(k in c for c in _h)]
+        _i_lead = _col(_h, "前置期")
+        _i_hard = _col(_h, "硬条件")
+        _bad_lead = [_r for _r in _rows if _i_lead >= 0 and not re.search(r"\d", _cell(_r, _i_lead))]
+        _bad_qual = []
+        for _r in _rows:
+            _hc = _cell(_r, _i_hard) if _i_hard >= 0 else ""
+            # ⚠️ 「无需资质」也是合法答案（不是所有物料都要证）—— 实测这一句会误触发，
+            #    所以先放过显式否定的写法，再要求「点了资质就得写资质名」。
+            if re.search(r"无需|不需要|不涉及|无资质|不适用", _hc):
+                continue
+            if re.search(r"资质|审批|备案|许可|卫健|食药", _hc) and not re.search(
+                    r"证|备案|许可|批准|号", _hc):
+                _bad_qual.append(_hc[:40])
+        _miss += (["前置期须含天数"] if _bad_lead else []) + (["资质类硬条件须写资质名"] if _bad_qual else [])
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 制作可行性：{'七列＋前置期数字＋资质名齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(
+                f"制作可行性缺「{'／'.join(_miss)}」—— **做得出来才算方案**：7 列齐（物料／形态／制作方／"
+                f"**前置期**／硬条件／最晚定稿日／难度）；前置期**必须是有天数的数字**"
+                f"（写「需提前准备」＝没算）；硬条件一旦涉及资质／审批，必须**写出资质名**"
+                f"（食品经营许可／医疗广告审查证明／演出许可），否则档期一定崩。")
+    else:
+        if not quiet:
+            print(f"  {NG} 制作可行性：**未找到 8.8**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「8.8 制作可行性与档期」—— 没有这一节，方案里所有物料都只是「想做的」，"
+                      "不是「做得出的」：前置期、资质、审批一样都没算。")
+
+    # 28c 洞察萃取「用的是哪一招」（体系2 #7）
+    _ins = _sec_any("洞察萃取")
+    if _ins:
+        _tricks = [t for t in ("找矛盾", "文化张力", "品类惯例反面") if t in _ins]
+        if not quiet:
+            print(f"  {OK if _tricks else NG} 洞察萃取：用的是哪一招 "
+                  f"{'／'.join(_tricks) if _tricks else '**未标注**'}")
+        if not _tricks:
+            _hard_if_full(
+                "洞察萃取没写「用的是哪一招」—— 三招：**找矛盾**（用户一边说 A 一边做非 A）／"
+                "**文化张力**（社会期待与真实欲望打架）／**品类惯例反面**（全行业都这么做，"
+                "所以反着来）。不写招数，洞察就退化成「观察的形容词版」，没法复现也没法反驳。")
+    else:
+        if not quiet:
+            print(f"  {NG} 洞察萃取：**未找到二·九**（骨架会给，缺了就是被删了）")
+
+    # 28d KPI 归因方式（体系2 #12）
+    _kp = _sec_any("KPI 表")
+    if _kp:
+        _h, _rows = _tbl(_kp)
+        _i_attr = _col(_h, "归因")
+        _miss = [] if _i_attr >= 0 else ["归因方式列"]
+        _bad_attr = 0
+        if _i_attr >= 0:
+            for _r in _rows:
+                _v = _cell(_r, _i_attr)
+                if not re.search(r"专属|码|分渠道|对照组|前后对照|基线", _v):
+                    _bad_attr += 1
+            if _bad_attr:
+                _miss.append(f"{_bad_attr} 行归因没四选一")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} KPI 归因方式：{'四选一齐全' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(
+                f"KPI 缺「{'／'.join(_miss)}」—— **观测方式 ≠ 归因方式**：观测是「看哪些数」，"
+                f"归因是「凭什么说是这次投放带来的」。四选一：**专属码／专属链接**（线上线下分流）、"
+                f"**分渠道埋点**、**对照组**（不投放的区域或人群）、**前后对照＋基线扣除**。"
+                f"没有归因列，活动期的自然增长会被算成方案的功劳。")
+    else:
+        if not quiet:
+            print(f"  {NG} KPI 归因方式：**未找到 6.1**（骨架会给，缺了就是被删了）")
+
+    # 28e 发布前合规送审（3.4，体系2 #10）—— 3.2 只说「什么话不能说」，没说「谁在什么时候拦下来」
+    _rv = _sec_any("合规送审")
+    if _rv:
+        _h, _rows = _tbl(_rv)
+        _i_who, _i_days = _col(_h, "谁审"), _col(_h, "提前")
+        _miss = [k for k, i in (("谁审（写岗位）", _i_who), ("提前几天送", _i_days)) if i < 0]
+        if _i_who >= 0 and any(re.search(r"团队|大家一起|全组|共同", _cell(_r, _i_who)) for _r in _rows):
+            _miss.append("「谁审」写了团队")
+        if _i_days >= 0 and any(
+                not re.search(r"\d|[一二三四五六七八九十两]+\s*(?:个)?(?:工作日|天|周|月|日)", _cell(_r, _i_days))
+                for _r in _rows):
+            _miss.append("提前天数不是数量")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 合规送审：{'谁审（岗位）＋提前天数齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(
+                f"发布前合规送审缺「{'／'.join(_miss)}」—— 「谁审」**必须写岗位**（法务岗／平台运营岗／外部律所），"
+                f"写「团队」「大家一起」＝**没有人负责**；「提前几天」**必须写数字**（法务要时间、平台审核要时间、"
+                f"资质备案更慢）。物料是当天做当天发的，所以送审只能靠提前，不能靠加急。")
+    else:
+        if not quiet:
+            print(f"  {NG} 发布前合规送审：**未找到 3.4**（骨架会给，缺了就是被删了）")
 
     # ── 结论
     print("\n" + "=" * 64)

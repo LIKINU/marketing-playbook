@@ -908,6 +908,40 @@ def main():
         _nxt = re.search(r"(?m)^##\s+", body[_start:])
         _secs[_m.group(1)] = body[_start:_start + (_nxt.start() if _nxt else len(body))]
 
+    # ⚠️ 2026-09-19（回基线复测时发现）：`_secs` **只切 `^## `（二级标题）**，
+    #   而骨架里 64/88 个标题是 `### `（三级）—— 于是「按标题名找 `###` 节」的判据
+    #   **永远取不到值**：`if _sec:` 不成立 → 后面的判据整段**静默跳过**。
+    #   实测死掉的三处：15b Red Team（`### 8.7`）、15d 主动放弃（`### 1.5`）、
+    #   15f 渠道形态（`### 5.1`）。**它们不是判错了，是从来没跑过。**
+    # → 凡按标题名取 `###` 节，一律走这个助手（`^#{2,3}`），并**必须写 else 分支报出来**。
+    def _sec_any(*keys):
+        for _m in re.finditer(r"(?ms)^#{2,3}\s+([^\n]*)\n(.*?)(?=^#{2,3}\s|\Z)", body):
+            if any(k in _m.group(1) for k in keys):
+                return _m.group(1) + "\n" + _m.group(2)
+        return ""
+
+    def _secs_all(*keys):
+        r"""**所有**命中节（不是第一个）。
+        ⚠️ 2026-09-19：`_sec_any("A","B")` 只回**第一个**命中 —— 若 A 在 B 之前，
+        A 被选中、**B 根本没被看**（实测：主动放弃查了 1.3 就再也没看 1.5，
+        于是 1.5 里明明写着两条「放弃」却被判「0 次」）。多目标一律用这个。"""
+        return [_m.group(1) + "\n" + _m.group(2)
+                for _m in re.finditer(r"(?ms)^#{2,3}\s+([^\n]*)\n(.*?)(?=^#{2,3}\s|\Z)", body)
+                if any(k in _m.group(1) for k in keys)]
+
+    # ⚠️ 2026-09-19：`_is_full_plan` 与 `_hard_if_full` **必须在所有判据之前定义** ——
+    #   原先它们躺在 15g／【16】开头（行号靠后），而 15d／15f 在它们**之前**执行；
+    #   一旦给早段的 else 分支加上 `_hard_if_full(...)`，就会 `NameError`（脚本当场崩）。
+    #   （本仓库的规矩：错误路径从没被跑过，写的时候看不出来。）
+    _is_full_plan = all(x in body for x in ["现状分析", "策略", "定位与口径", "预算明细"])
+
+    def _hard_if_full(msg):
+        """完整版才判硬错误；速览类快案降为警告。（判据：_is_full_plan）"""
+        if _is_full_plan:
+            hard_errors.append(msg)
+        else:
+            warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
+
     # 14a 执行摘要
     _abs = next((v for k, v in _secs.items() if "执行摘要" in k or "执行摘要" in k), "")
     _n_num = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|万|单|单|人|店|次|万|万)", _abs))
@@ -1035,18 +1069,43 @@ def main():
         warnings.append("未见「利益相关者与阻力处理」章 —— 桌面档／B端／G端 交付必须补（见 12-范式库）")
 
     # 15b Red Team
-    _rt = [v for k, v in _secs.items() if "最可能怎么死" in k]
+    # ⚠️ 2026-09-19：原先用 `_secs` 找 `### 8.7` → **从不触发**（见 `_sec_any` 的说明）。
+    _rt_txt = _sec_any("最可能怎么死")
+    _rt = [_rt_txt] if _rt_txt else []
     if _rt:
         _txt = _rt[0]
         _n_arg = len(re.findall(r"最强反方论点", _txt))
         _n_cond = len(re.findall(r"成立的条件", _txt))
         _n_date = len(re.findall(r"成立的条件[^\n]*\d", _txt))
         _ok = _n_arg >= 3 and _n_cond >= 3 and _n_date >= 3
+        # ⚠️ 2026-09-19（回基线复测时发现）：骨架里写着「三条必须**互不相同**（两两相似会被判复读）」
+        #   —— 但那句**承诺没有判据兑现**（本条原先只数条数与数字）。**骨架承诺的东西必须真被判**，
+        #   否则就是把「会被检查」写进交付稿骗填稿的人。这里补上复读检测：
+        #   三条论点两两做 bigram Jaccard，任一对 ≥0.5 即判「同一句话换了个说法」。
+        def _bigrams(s):
+            s = re.sub(r"[\s，。、；：（）()「」【】\*_#\-—…0-9A-Za-z]", "", s)
+            return {s[i:i + 2] for i in range(len(s) - 1)} if len(s) > 1 else set()
+        _args = [re.sub(r"^[-\s*]*", "", x.strip())[:200]
+                 for x in re.findall(r"最强反方论点[：:]\s*([^\n]+)", _txt)]
+        _dup = []
+        for _i in range(len(_args)):
+            for _j in range(_i + 1, len(_args)):
+                _a, _b = _bigrams(_args[_i]), _bigrams(_args[_j])
+                if _a and _b:
+                    _jac = len(_a & _b) / len(_a | _b)
+                    if _jac >= 0.5:
+                        _dup.append((_i + 1, _j + 1, _jac))
         if not quiet:
-            print(f"  {OK if _ok else NG} Red Team：论点 {_n_arg}/3、条件 {_n_cond}/3、"
-                  f"含数字或日期的条件 {_n_date}/3")
+            print(f"  {OK if _ok and not _dup else NG} Red Team：论点 {_n_arg}/3、条件 {_n_cond}/3、"
+                  f"含数字或日期的条件 {_n_date}/3"
+                  + (f"、**复读 {len(_dup)} 对**" if _dup else "、三条互不相同"))
         if not _ok:
             hard_errors.append("Red Team 不达标 —— 定长三条，且每条的「成立条件」必须含数字或日期。")
+        for _i, _j, _jac in _dup[:3]:
+            hard_errors.append(
+                f"Red Team 第 {_i} 条与第 {_j} 条是同一句话换说法（相似度 {_jac:.0%} ≥50%）—— "
+                f"骨架里写着「三条必须互不相同（两两相似会被判复读）」，而**提三次同一个反对意见"
+                f"不叫压力测试**。换成三个不同方向的死法（客户不买／竞品跟进／执行不了）。")
     else:
         warnings.append("未见「这个方案最可能怎么死」（Red Team）章 —— 建议补")
 
@@ -1061,14 +1120,21 @@ def main():
             hard_errors.append("洞察萃取不达标 —— 必须有共鸣测试（念给 3 个人，几人说「啊，我也是」）。")
 
     # 15d 主动放弃
-    _con = [v for k, v in _secs.items() if "约束与风险底线" in k]
+    # ⚠️ 2026-09-19：原先用 `_secs` 找 `### 1.5 约束与风险底线` → **从不触发**，
+    #   而且**连提醒都没有**（没有 else 分支）—— 比判错更危险的一种状态。
+    _con = _secs_all("约束与风险底线", "已排除的假设")
     if _con:
-        _n_give = len(re.findall(r"放弃|不做|砍掉|砍哪", _con[0]))
+        _n_give = len(re.findall(r"放弃|不做|砍掉|砍哪", "\n".join(_con)))
         _ok = _n_give >= 2
         if not quiet:
             print(f"  {OK if _ok else NG} 主动放弃：出现 {_n_give} 次（需 ≥2）")
         if not _ok:
             hard_errors.append("「主动放弃了什么」不足 2 条 —— 只写约束不写放弃，等于没做取舍（80/20 的反面）。")
+    else:
+        if not quiet:
+            print(f"  {NG} 主动放弃：**未找到 1.5 约束与风险底线**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「1.5 约束与风险底线（含主动放弃）」—— **只写约束不写放弃，等于没做取舍**："
+                      "一份不写「放弃了什么」的方案，无法证明资源被放在了回报最高的地方。")
 
     # 15e 创意回指
     if re.search(r"Big Idea", body):
@@ -1087,7 +1153,7 @@ def main():
     #          · 稿是完整版（八篇骨架）却没用这章 → 硬错误（漏了 BCG 的题眼）
     #          · 稿是速览类（没有完整八篇） → 只提醒，不拦
     _has_issue_tree = "议题树与假设台账" in body
-    _is_full_plan = all(x in body for x in ["现状分析", "策略", "定位与口径", "预算明细"])
+    # `_is_full_plan` 已上移（见 `_sec_any` 之后），此处不再重复赋值 —— 同一件事只留一个表达式。
     _h_all = re.findall(r"\bH(\d+)\b", body)
     _distinct = sorted(set("H" + n for n in _h_all))
     _refer = sorted(h for h in _distinct if body.count(h) >= 2)   # 定义＋被引≥1 次
@@ -1111,7 +1177,9 @@ def main():
             print(f"  {INFO} 未使用议题树结构（速览类快案可忽略）")
 
     # 15f 渠道不可移植元素
-    _ch = [v for k, v in _secs.items() if "不同形态" in k]
+    # ⚠️ 2026-09-19：原先用 `_secs` 找 `### 5.1 不同形态` → **从不触发**（同 15b／15d）。
+    _ch_txt = _sec_any("不同形态")
+    _ch = [_ch_txt] if _ch_txt else []
     if _ch:
         _txt = _ch[0]
         _rows = [r for r in _txt.split("\n") if r.strip().startswith("|")][1:]
@@ -1121,18 +1189,20 @@ def main():
                   f"{'是' if '不可移植' in _txt else '否'}")
         if not _ok:
             hard_errors.append("渠道只是「换名字」—— 5.1 表必须有「不可移植元素」列，且每渠道至少 1 个。")
+    else:
+        if not quiet:
+            print(f"  {NG} 渠道形态表：**未找到 5.1 同一母题·各渠道的不同形态**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「5.1 同一母题 · 各渠道的不同形态」—— **渠道原生**的判据是"
+                      "「每个渠道至少一个不可移植元素」（放到别的渠道就失效的那个东西）；"
+                      "缺这一节＝同一段内容换个渠道名。")
 
     # ── 【16】合规红线与量化可验（2026-09-17 随 R2 一起加）
     #    ⚠️ 本关的很多要求属「**完整版方案才该有**」。今天已经**连续四次**因为
     #       新硬关无条件生效而误伤速览类快案（smoke_test 的标杆稿）：
     #         ① `8a 为什么这么做须含实质`  ② `15g 议题树`  ③ `16f 敏感性`  ④ `16g KPI 频率/责任人`
     #       所以不再逐次打补丁，改成一个显式助手 —— 新加的「完整版要求」一律走它。
-    def _hard_if_full(msg):
-        """完整版才判硬错误；速览类快案降为警告。（判据：_is_full_plan）"""
-        if _is_full_plan:
-            hard_errors.append(msg)
-        else:
-            warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
+    #   （⚠️ 2026-09-19：`_is_full_plan` 与 `_hard_if_full` 已**上移到 `_sec_any` 之后** ——
+    #     15d／15f 在它们之前执行，留在原处会让早段的调用 `NameError`。）
 
     # 15i 样稿实质（2026-09-19 · agency-4a 第 5 条）
     #

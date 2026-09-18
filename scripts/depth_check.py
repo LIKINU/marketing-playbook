@@ -679,6 +679,23 @@ def check_actions(lines, all_tables):
         d.warn("行动清单缺「花多少／预算」列（建议补上）")
     if i_chk < 0:
         d.warn("行动清单缺「怎么验收」列（建议补上）")
+    # ── 2026-09-19（A 批 · 执行视角第 2 条）：骨架给了 10 列，这里以前只硬校验 2 列。
+    #    「谁做、什么时候」之外，「出了事谁替、谁验收、超权限找谁批」同样是一票否决级的
+    #    —— 缺了这三列，方案到一线就变成「没人接、没人验、批不了」。
+    for _idx, _nm, _why in ((col_index(tb["header"], ["替补"]), "替补人",
+                             "负责方请假或离职时没人接"),
+                            (col_index(tb["header"], ["验收人", "谁验收"]), "验收人",
+                             "谁验收不写＝没人验收"),
+                            (col_index(tb["header"], ["决策权限", "谁能批"]), "决策权限",
+                             "超出预算找谁批，一线只能停摆")):
+        if _idx < 0:
+            d.warn(f"行动清单缺「{_nm}」列 —— {_why}（骨架已给位，建议补上）")
+        else:
+            _empty = [str(k + 1) for k, r in enumerate(rows) if not cell(r, _idx)]
+            if len(_empty) / max(len(rows), 1) > 0.1:
+                d.fail(f"第 {','.join(_empty[:8])} 行「{_nm}」为空（要求 ≥90% 非空）—— {_why}")
+            else:
+                d.ok(f"行动清单「{_nm}」非空率 {1 - len(_empty) / len(rows):.0%}")
 
     with_num = [r for r in rows if any(has_digit(c) for c in r)]
     ratio = len(with_num) / n if n else 0

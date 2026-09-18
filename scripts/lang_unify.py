@@ -49,7 +49,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 TEXT_EXT = {".md", ".py", ".json", ".sh", ".txt"}
-SKIP_DIRS = {".git", ".workbuddy", "__pycache__", "node_modules"}
+SKIP_DIRS = {".git", ".workbuddy", "__pycache__", "node_modules",
+             # 本地工作稿（把书／长文拆成一节节的中间产物，已进 .gitignore 不入库）——
+             # 它与 `repo_hygiene.SKIP_DIRS` 同步排除：不入库的东西不必进语言统一的报告，
+             # 否则「需转换：1 个文件｜0 处」这种空报告会一直挂在最后一关。
+             "解析产物"}
 
 # 整档略过（见档头 ① ）
 # ⛔ 这两支**整档都不许动**（见下方 VOCAB 注释的同一道理）：

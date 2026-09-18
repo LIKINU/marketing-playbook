@@ -1715,6 +1715,68 @@ def main():
                       f"客户无法判断哪部分是方案挣的。要拆成「基线（不做也会自然涨）＋ 净增量（本方案带来）」，"
                       f"并在 7.2 写清增量口径（对照组／去年同期／前后对比）。")
 
+    # 24) B 批第二批：现金流 / 个保法 / 里程碑 / 签批（2026-09-19）
+    def _sec24(*keys):
+        for _m in re.finditer(r"(?ms)^#{2,3}\s+([^\n]*)\n(.*?)(?=^#{2,3}\s|\Z)", body):
+            if any(k in _m.group(1) for k in keys):
+                return _m.group(1) + "\n" + _m.group(2)
+        return ""
+
+    # 24a 现金流时序与资金缺口（投资人视角第 6 条）
+    _cf = _sec24("现金流与垫资")
+    if _cf:
+        # ⚠️ 列名只查**表头行**，不能查整节 —— 说明文字里也写着这些词，
+        #   查整节会让「列被删了、注释还在」的稿子照样通过（实测踩过）。
+        _hdr = next((r for r in _cf.split("\n") if r.strip().startswith("|")), "")
+        _miss = [k for k in ("累计净流",) if k not in _hdr]
+        _miss += [k for k in ("最大资金缺口", "缺口持续") if k not in _cf]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 现金流：{'含缺口与持续周数' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"现金流缺「{'／'.join(_miss)}」—— 只写「最大现金亏损」是**总量、没有时序**："
+                          f"同样亏 20 万，「前两周垫」与「第三个月才垫」是两门生意。"
+                          f"要给按周净流、`最大缺口＝min(累计净流)`、缺口持续几周。")
+    else:
+        if not quiet:
+            print(f"  {NG} 现金流与垫资：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 24b 个人信息与隐私合规（合规视角第 4 条）
+    _pv = _sec24("个人信息与隐私")
+    if _pv:
+        # 同上：这三个都是**列名**，只查表头行
+        _hdr = next((r for r in _pv.split("\n") if r.strip().startswith("|")), "")
+        _miss = [k for k in ("合法性基础", "最小必要", "留存期限") if k not in _hdr]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 个保法台账：{'五要素齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"个人信息台账缺「{'／'.join(_miss)}」—— 收集手机号／加微／建群／人脸／定位时，"
+                          f"合法性基础、最小必要、留存期限是刚性要求。"
+                          f"**不写留存期限＝默认永久保存**，这是最常被查的一条。")
+    else:
+        if not quiet:
+            print(f"  {NG} 个人信息与隐私：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 24c 推进里程碑 30/60/90（执行视角第 4 条）
+    _ms = _sec24("推进里程碑")
+    if _ms:
+        _rows = [r for r in _ms.split("\n") if r.strip().startswith("|")][2:]
+        _rows = [r for r in _rows if r.replace("|", "").strip()]
+        _ok = len(_rows) >= 3
+        if not quiet:
+            print(f"  {OK if _ok else NG} 推进里程碑：{len(_rows)} 段（需 30／60／90 共 3 段）")
+        if not _ok:
+            _hard_if_full(f"推进里程碑只有 {len(_rows)} 段 —— 跨月客户必须有 30／60／90 三段，"
+                          f"且每段绑一个**交付物**和一个**量化信号**；「持续推进」不是里程碑。")
+    else:
+        if not quiet:
+            print(f"  {NG} 推进里程碑：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 24d 交付物签批（合规视角第 15 条）—— 基线第 10 条卡在 4.5/5 的直接原因
+    _miss24d = [k for k in ("版本", "编制", "审核", "变更记录") if k not in body]
+    if not quiet:
+        print(f"  {OK if not _miss24d else NG} 交付物签批：{'版本·编制·审核·变更记录齐' if not _miss24d else '缺 ' + '／'.join(_miss24d)}")
+    if _miss24d:
+        _hard_if_full(f"交付物缺「{'／'.join(_miss24d)}」—— 机械治理做到了 4.5／5，差的正是**「人」这一层**："
+                      f"谁编的、谁审的、谁签的、改了哪几版。封面要有「版本·编制·审核签批·日期」，"
+                      f"正文要有「变更记录（日期／改了什么／为什么／谁批的）」。")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

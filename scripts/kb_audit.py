@@ -403,6 +403,69 @@ def l7(quiet):
     return len(bad), 1
 
 
+# ── L8：口径一致（**同一概念只许有一个数**）────────────────────────
+# 为什么要有这一关（2026-09-19 · 六体系逐行核对 · 体系3 agent 报出）：
+#   「回本警戒线」在不同文件里出现过 **6／9／12／18 四种值**；`00-打法库.md` 里
+#   LTV 公式**并存两套**（四因子含留存年限 ／ 三因子缺它）。
+#   这类冲突**不会报错**，只会让两份材料互相打脸 —— 而此前**没有任何判据在对账**。
+#   → 常量统一放 `_common.py`（PAYBACK_WARN_STORE／PAYBACK_WARN_AD／LTV_FORMULA），
+#     这里扫「定义句」是否与常量一致。
+#
+# ⚠️ **本关初版是「扫所有含回本数字的句子」，实测 5 条全是误报**（LTV×转化率、
+#   模型名表里的 CAC/LTV、KPI 行 LTV:CAC ≥ 2:1、注释里的旧公式、以及
+#   「3 个月单店回本 >6 个月」里被当成阈值的 3）——**不成熟的检查器就是噪声**。
+#   → 改成**只锚定定义句**：必须出现「单店投入…回本…N 个月」「品牌投放…回本…N 个月」
+#     或 `生命周期价值 LTV（…×…）` 这种**定义形态**。实测 0 误报，且负向测试会叫。
+L8_STORE = re.compile(r"单店投入[^\n]{0,12}回本[^\n]{0,12}?(\d+)\s*个月")
+L8_AD = re.compile(r"品牌投放[^\n]{0,12}回本[^\n]{0,12}?(\d+)\s*个月")
+L8_LTV = re.compile(r"生命周期价值\s*LTV\s*[（(][^）)\n]*×[^）)\n]*[）)]")
+
+
+def l8(quiet):
+    import importlib.util as _ilu
+    try:
+        _spec = _ilu.spec_from_file_location("_common", os.path.join(HERE, "_common.py"))
+        _c = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_c)
+        _store, _ad = _c.PAYBACK_WARN_STORE, _c.PAYBACK_WARN_AD
+    except Exception:
+        _store, _ad = 6, 12
+    bad = []
+    me = os.path.basename(__file__)
+    # ⚠️ 只扫**内容档**（md／脚本／根目录说明），与 L7 用同一套枚举 —— 不另外发明一套范围
+    #   （本仓库的教训：同一件事两处各写一遍，迟早漂移）。
+    for f in md_files() + glob.glob(os.path.join(HERE, "*.py")) \
+            + glob.glob(os.path.join(ROOT, "*.md")):
+        if any(s in f for s in PRIVATE_SKIP_DIR) or os.path.basename(f) == me:
+            continue
+        rel = os.path.relpath(f, ROOT)
+        if "12-范式库" in rel or rel.startswith("优化记录"):
+            continue                      # 生成物与过程记录不参与对账（源头在 composer／paradigm_data）
+        try:
+            t = read(f)
+        except Exception as _e:
+            # ⛔ 不静默（optimize_scan 会抓 `except: continue`；L7 也是这么处理的）：
+            #    「没扫到」与「扫不了」是两回事，后者是盲区 —— 静默跳过会让人以为扫过了。
+            print(f"  ⚠️ L8 口径扫描跳过（读不了）：{rel}（{type(_e).__name__}）")
+            continue
+        for i, ln in enumerate(t.split("\n"), 1):
+            for pat, allow, lab in ((L8_STORE, _store, "单店投入回本"),
+                                    (L8_AD, _ad, "品牌投放回本")):
+                for m in pat.finditer(ln):
+                    if int(m.group(1)) != allow:
+                        bad.append((rel, i, f"{lab}={m.group(1)} 个月（`_common.py` 里是 {allow}）",
+                                    ln.strip()[:76]))
+            for m in L8_LTV.finditer(ln):
+                if "留存年限" not in m.group(0):
+                    bad.append((rel, i, "LTV 公式缺「留存年限」（四因子才算同一口径）",
+                                m.group(0)[:76]))
+    if not quiet:
+        print(f"  L8 口径一致（回本阈值／LTV 公式）：**{len(bad)} 处冲突**")
+        for f, i, why, l in bad[:10]:
+            print(f"     ✗ {f}:{i} {why}｜{l}")
+    return len(bad), 1
+
+
 # ── L6：全量回归（6 个既有脚本一次跑完）──────────────────────
 SCRIPTS = ["file_meta.py", "case_sections.py", "case_order.py",
            "case_upgrade.py", "case_lint.py", "smoke_test.py"]
@@ -452,6 +515,7 @@ def main():
         print("  L6 全量回归（6 个既有脚本）：")
     f6, t6 = l6(q)
     f7, t7 = l7(q)
+    f8, t8 = l8(q)
 
     print("-" * 68)
     # 断链类（L1/L2/L4/L6/L7）＝机器能不能动；覆盖率类（L3/L5 未用）＝还有多少没接上，
@@ -464,6 +528,7 @@ def main():
         ("L4 交付物占位符", f4, inj),
         ("L6 既有校验未通过", f6, t6),
         ("L7 私有痕迹（公开仓库红线）", f7, t7),
+        ("L8 口径一致（回本阈值／LTV 公式）", f8, t8),
     ]
     # ⚠️ 2026-09-19 修：这两行原先印的是 `tp3 - i3` / `t3 - cov3` —— **互补数**，
     #   标签却写着「含本行业卡」「覆盖到的卡片数」→ 同一件事在**同一份报告里印出两个数**
@@ -483,7 +548,8 @@ def main():
         print(f"  ○ {name}：{cov}/{tot}")
     print("-" * 68)
     if total_bad == 0:
-        print("✅ 五类断链全通 —— 知识库是「连通的」，不只是「零件合格」")
+        # ⚠️ 数字**现算**，不写死：「五类」「六类」这种手写数会随关卡增减过期
+        print(f"✅ {len(rows)} 类断链全通 —— 知识库是「连通的」，不只是「零件合格」")
     else:
         print(f"⚠️ 共 {total_bad} 个断点。**零件合格 ≠ 机器能动** —— 这些断点不会被前 6 个脚本发现。")
     sys.exit(0 if total_bad == 0 else 1)

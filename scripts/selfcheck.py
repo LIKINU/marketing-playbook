@@ -1849,6 +1849,65 @@ def main():
         if not quiet:
             print(f"  {NG} 素材资产台账：**未找到这一节**（骨架会给，缺了就是被删了）")
 
+    # 26) B 批：危机三件 —— 口径唯一性 / 达人塌房切割追偿 / 评论区值守（2026-09-19）
+    #     三件的共同点：**它们不是「多一些风险条目」，而是危机里最先坏掉的那三样东西** ——
+    #     谁在说话、切了之后素材从哪来、差评在评论区挂着没人回。
+    # 26a 唯一发声人与口径审批（8.6.1）
+    _vo = _sec25("舆情升级与对外发声")
+    if _vo:
+        _need = {"唯一对外发声口": "唯一对外发声口", "口径审批": "口径审批人"}
+        _miss = [k for k, v in _need.items() if v not in _vo]
+        _silence = any(k in _vo for k in ("全员静默", "不得代表品牌"))
+        if not _silence:
+            _miss.append("全员静默范围")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 发声口径："
+                  f"{'唯一发声口＋审批人＋静默范围齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"发声口径缺「{'／'.join(_miss)}」—— 舆情事故的**二次伤害几乎都来自「不止一个人在说话」**："
+                          f"一线、加盟商、外包客服、合作达人的个人号抢先代表品牌发声，或者回复出去了才发现口径没人审。"
+                          f"这一节要写死三件事：品牌名下**只有 1 个署名发声口**、对外每一句**谁签字**、"
+                          f"以及**这些人不得代表品牌发声**（含不得在评论区争论）。")
+    else:
+        if not quiet:
+            print(f"  {NG} 舆情升级与对外发声：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 26b 达人塌房：切割与追偿（8.9.1）
+    _cr = _sec25("达人塌房")
+    if _cr:
+        _miss = [k for k in ("时限", "留什么证") if k not in _hdr_of(_cr)]
+        if "定性" not in _cr:
+            _miss.append("定性阶段")
+        if "追偿" not in _cr:
+            _miss.append("追偿")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 达人塌房："
+                  f"{'定性与追偿＋留证列齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"达人塌房缺「{'／'.join(_miss)}」—— 合同表里那一列管的是**数据造假**，"
+                          f"达人**塌房**是另一条链：**只认官方通报／平台处罚／本人承认**（未定性不切割、也不背书）、"
+                          f"定性后 2 小时内全部位下架、**每一步留什么证**（不带时间戳的截图追偿时不算证据）、"
+                          f"以及依合同哪一条追回已付费用。**不切割＝品牌连坐；切得快但留不下证＝钱追不回来。**")
+    else:
+        if not quiet:
+            print(f"  {NG} 达人塌房：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 26c 评论区与私信值守（8.3.5）
+    _cm = _sec25("评论区与私信值守")
+    if _cm:
+        _miss = [k for k in ("值守人", "首响时限") if k not in _hdr_of(_cm)]
+        if not any(k in _cm for k in ("必须删", "举报")):
+            _miss.append("必须删／举报清单")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 评论区值守："
+                  f"{'值守人＋首响＋删举报清单齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"评论区值守缺「{'／'.join(_miss)}」—— 投放把评论冲上来、没人接，"
+                          f"等于**花钱买了一个没人管的差评墙**。要写清谁值守（几班）、多久内回、"
+                          f"什么必须回、**什么必须删或举报**（人身攻击／竞品刷屏／涉政涉黄）、"
+                          f"以及同类问题 ≥3 条时按舆情升级处理。")
+    else:
+        if not quiet:
+            print(f"  {NG} 评论区与私信值守：**未找到这一节**（骨架会给，缺了就是被删了）")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

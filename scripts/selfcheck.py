@@ -1777,6 +1777,78 @@ def main():
                       f"谁编的、谁审的、谁签的、改了哪几版。封面要有「版本·编制·审核签批·日期」，"
                       f"正文要有「变更记录（日期／改了什么／为什么／谁批的）」。")
 
+    # 25) B 批第三批：概念测试 / 媒介策划 / 备货库存 / 素材台账（2026-09-19）
+    #     ⚠️ 列名一律查**表头行**（上一批的教训：查整节会漏掉「列被删了、注释还在」）
+    def _sec25(*keys):
+        for _m in re.finditer(r"(?ms)^#{2,3}\s+([^\n]*)\n(.*?)(?=^#{2,3}\s|\Z)", body):
+            if any(k in _m.group(1) for k in keys):
+                return _m.group(1) + "\n" + _m.group(2)
+        return ""
+
+    def _hdr_of(sec):
+        return next((r for r in sec.split("\n") if r.strip().startswith("|")), "")
+
+    # 25a 概念测试三要素（4A 工序第 6 条）
+    _ct = _sec25("概念测试")
+    if _ct:
+        _miss = [k for k in ("测试对象", "问什么", "合格线") if k not in _hdr_of(_ct)]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 概念测试：{'三要素齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"概念测试缺「{'／'.join(_miss)}」—— 三要素缺一不可：**对象**（是谁、多少人）、"
+                          f"**问什么**（原样复述／二选一偏好）、**合格线**（含百分比）。"
+                          f"只写「做了共鸣测试」不算做过测试。")
+    else:
+        if not quiet:
+            print(f"  {NG} 概念测试：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 25b 媒介组合与预算分配（4A 工序第 8 条）
+    _md = _sec25("媒介组合与预算分配")
+    if _md:
+        _miss = [k for k in ("预算占比", "预期触达", "频次") if k not in _hdr_of(_md)]
+        if "三段排期" not in _md:
+            _miss.append("三段排期")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 媒介策划：{'占比/触达/频次/三段排期齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"媒介策划缺「{'／'.join(_miss)}」—— 没有预算占比的渠道计划**等于没有媒介计划**；"
+                          f"跨渠道触达不能简单相加（要给去重口径）；预热／引爆／承接三段各绑一个结果。")
+        else:
+            # 占比合计必须 = 100%
+            _pcts = [float(x) for x in re.findall(r"\|\s*(\d+(?:\.\d+)?)\s*%", _md)]
+            _rowsum = sum(_pcts) if _pcts else 0
+            if _pcts and abs(_rowsum - 100) > 1:
+                if not quiet:
+                    print(f"  {WARN} 媒介预算占比逐行相加 = {_rowsum:.0f}%（≠100%）—— 请核对")
+                _hard_if_full(f"媒介预算占比逐行相加 = {_rowsum:.0f}%（**须 = 100%**）—— "
+                              f"占比不加总到 100，说明有渠道的预算没写全。")
+    else:
+        if not quiet:
+            print(f"  {NG} 媒介组合与预算分配：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 25c 备货与库存（执行视角第 5 条）
+    _st = _sec25("备货与库存")
+    if _st:
+        _miss = [k for k in ("安全库存线", "临期") if k not in _hdr_of(_st) and k not in _st]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 备货与库存：{'含安全线与临期处理' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"备货与库存缺「{'／'.join(_miss)}」—— **先算能卖多少再承诺卖多少**："
+                          f"承诺量 > 现有库存 + 前置期内可补量 ＝ 注定超卖；临期／尾货不给路，毛利会被吃掉。")
+    else:
+        if not quiet:
+            print(f"  {NG} 备货与库存：**未找到这一节**（骨架会给，缺了就是被删了）")
+    # 25d 素材资产台账（4A 工序第 11 条）
+    _da = _sec25("素材资产台账")
+    if _da:
+        _miss = [k for k in ("授权起止", "到期替换动作") if k not in _hdr_of(_da)]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 素材台账：{'含授权起止与到期动作' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"素材台账缺「{'／'.join(_miss)}」—— 字体／音乐／肖像／付费图库都有期限，"
+                          f"**到期还在用＝侵权**，而且通常是客户被投诉了才知道。")
+    else:
+        if not quiet:
+            print(f"  {NG} 素材资产台账：**未找到这一节**（骨架会给，缺了就是被删了）")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

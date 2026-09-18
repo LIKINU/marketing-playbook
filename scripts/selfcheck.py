@@ -1553,6 +1553,101 @@ def main():
         elif not quiet:
             print(f"  {OK} 敏感性参数：含复购/留存")
 
+    # 22) A 批第四批：投资人 5 条 + 执行 3 条（2026-09-19）
+    #
+    # ⚠️ 与【21】同理：都是「骨架刚补了列/表」的判据。骨架位本轮已做齐全性总检。
+    # 22a 0.1 因子表的「数据来源」列非空率（投资人视角第 5 条）
+    _f01 = re.findall(r"(?ms)^#{2,3}\s*0\.1[^\n]*\n(.*?)(?=^#{2,3}\s|\Z)", body)
+    if _f01:
+        _rows = [r for r in _f01[0].split("\n") if r.strip().startswith("|")][2:]
+        if _rows:
+            _has_src = [r for r in _rows if len([c for c in r.split("|") if c.strip()]) >= 6]
+            _rate = len(_has_src) / len(_rows)
+            if not quiet:
+                print(f"  {OK if _rate >= 0.9 else NG} 0.1 因子表：带「数据来源（口径／时点）」的行 {_rate:.0%}（需 ≥90%）")
+            if _rate < 0.9:
+                _hard_if_full("0.1 因子表的「数据来源（口径／时点）」列缺失或大量留空 —— "
+                              "裸数字客户无法追溯，会被追问「这个 42% 哪来的」。")
+    # 22b 目标营收 vs 四因子乘积（投资人视角第 4 条）
+    _rev = re.search(r"目标营收[^\n]{0,20}?([\d,]+(?:\.\d+)?)\s*(万|亿)?", body)
+    if _f01 and _rev:
+        _nums = {}
+        for _k in ("流量", "转化率", "客单价", "复购"):
+            _m = re.search(_k + r"[^\n|]*\|[^\n|]*\|", _f01[0])
+            _r = [r for r in _f01[0].split("\n") if r.strip().startswith("|") and _k in r]
+            if _r:
+                _cells = [c.strip() for c in _r[0].split("|")]
+                _v = [c for c in _cells if re.fullmatch(r"[\d.,%％]+", c)]
+                if _v:
+                    _nums[_k] = float(_v[-1].replace(",", "").rstrip("%％"))
+        if len(_nums) == 4:
+            _prod = _nums["流量"] * (_nums["转化率"] / 100 if _nums["转化率"] > 1 else _nums["转化率"]) \
+                * _nums["客单价"] * _nums["复购"]
+            if not quiet:
+                print(f"  {INFO} 目标营收 {_rev.group(1)} vs 四因子乘积 {_prod:,.0f}（人工核对）")
+        elif not quiet:
+            # ⚠️ 这里**必须出声**：解析不到就不报，等于这一关从未生效
+            #    （本仓库刚刚因为「找不到目标就静默跳过」吃过一次亏）。
+            print(f"  {WARN} 目标营收×四因子勾稽：**无法复算**（只解析到 {len(_nums)}/4 个因子）—— 请人工核对")
+    # 22c 8.2 人力负荷表（执行视角第 6 条）
+    _hr = re.findall(r"(?ms)^#{2,3}\s*8\.2[^\n]*\n(.*?)(?=^#{2,3}\s|\Z)", body)
+    if _hr:
+        _miss = [k for k in ("是否超载", "补法") if k not in _hr[0]]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 人力负荷表：{'含超载判定与补法' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"人力负荷表缺「{'／'.join(_miss)}」—— 只说「人手不够」不够："
+                          f"要逐岗位算负荷（天／月），超载的给出**加人／外包／上工具**三选一与成本。")
+    # 22d 预算伸缩（投资人视角第 12 条）
+    if re.search(r"执行人力与资源伸缩|删减顺序", body):
+        _miss = [k for k in ("−50%", "+100%") if k not in body]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 预算伸缩：{'砍半与加倍都写了' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full("缺「预算 −50% 先砍哪条／+100% 先加哪条」—— 决策者一定会问这两个问题；"
+                          "只给一个固定预算的方案，遇到砍预算就整份作废。")
+    # 22e 首单 ROI（投资人视角第 14 条）
+    if "单位经济与回本" in body:
+        if "首单 ROI" not in body:
+            _hard_if_full("单位经济缺「首单 ROI」—— **首单亏是常态**，但要写明亏多少、"
+                          "以及最长容忍回本月数，只给生命周期口径不够。")
+        elif not quiet:
+            print(f"  {OK} 单位经济：含首单 ROI 双口径")
+    # 22f 分渠道单位经济（投资人视角第 9 条）
+    _c14 = re.findall(r"(?ms)^#{2,3}\s*14\.2[^\n]*\n(.*?)(?=^#{2,3}\s|\Z)", body)
+    if _c14:
+        _rows = [r for r in _c14[0].split("\n") if r.strip().startswith("|")][2:]
+        _rows = [r for r in _rows if len([c for c in r.split("|") if c.strip()]) >= 3]
+        if not quiet:
+            print(f"  {OK if len(_rows) >= 2 else NG} 分渠道单位经济：{len(_rows)} 个渠道（需 ≥2）")
+        if len(_rows) < 2:
+            _hard_if_full(f"分渠道单位经济只有 {len(_rows)} 个渠道（需 ≥2）—— "
+                          f"**混着算会把高质渠道的钱补贴给低质渠道**。")
+    else:
+        # ⚠️ else 也必须出声（2026-09-19 的教训）：这一段骨架一定会给，
+        #   所以「找不到」本身就是问题。写法上刻意不留「找不到就跳过」的静默分支 ——
+        #   16g 就是因为骨架没给表而静默了几个月，没人去看那句「未生效」。
+        if not quiet:
+            print(f"  {NG} 分渠道单位经济：**未找到 14.2 这一节**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「14.2 分渠道单位经济」—— 知识库明说「一定要分渠道算 LTV，"
+                      "不同渠道用户质量差异巨大」，只给合计值会把高质渠道的钱补贴给低质渠道。")
+    # 22g 加盟商试点（执行视角第 3 条）
+    if "14.1 对门店" in body or "对门店／加盟商的账" in body:
+        _miss = [k for k in ("试点选择标准", "首批家数") if k not in body]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 加盟商试点：{'含试点与首批' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full("加盟商的账缺「试点选择标准／首批家数」—— 只算账不够，"
+                          "要回答「**先让哪 10 家动、给它们什么额外好处、用它们的数据说服剩下的人**」。")
+    # 22h 跨部门接口与冲突升级（执行视角第 7 条）
+    if "行动清单" in body:
+        _miss = [k for k in ("依赖方", "冲突升级") if k not in body]
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 跨部门接口：{'含依赖方与升级路径' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"行动清单缺「{'／'.join(_miss)}」—— 每个要别人配合的动作，"
+                          f"都要写清「从谁那里拿什么、几号给我、他不给我找谁拍板」。")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

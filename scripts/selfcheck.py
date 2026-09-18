@@ -2217,6 +2217,99 @@ def main():
         if not quiet:
             print(f"  {NG} 发布前合规送审：**未找到 3.4**（骨架会给，缺了就是被删了）")
 
+    # 29) C 批第二批：补三个「缺位」（2026-09-19）
+    # 29a 决策人问答预判（体系1 #6）—— 原先只有大赛／G端有，标准／B端／投标过会却没有预判
+    _qa = _sec_any("决策人问答预判")
+    if _qa:
+        _h, _rows = _tbl(_qa)
+        _i_ans = _col(_h, "答法")
+        _i_cat = _col(_h, "类")
+        _misss = [] if len(_rows) >= 5 else [f"只有 {len(_rows)} 行（需 ≥5）"]
+        _cats = {_cell(_r, _i_cat) for _r in _rows} if _i_cat >= 0 else set()
+        _lack = [c for c in ("效果", "风险", "资源", "取舍") if not any(c in x for x in _cats)]
+        if _lack:
+            _misss.append("缺类别 " + "／".join(_lack))
+        _nodigit = [_r for _r in _rows if _i_ans >= 0 and not re.search(r"\d", _cell(_r, _i_ans))]
+        if _nodigit:
+            _misss.append(f"{len(_nodigit)} 行答法没数字")
+        if not quiet:
+            print(f"  {OK if not _misss else NG} 决策人问答预判："
+                  f"{'≥5 行＋四类齐＋答法带数字' if not _misss else '缺 ' + '／'.join(_misss)}")
+        if _misss:
+            _hard_if_full(
+                f"决策人问答预判缺「{'／'.join(_misss)}」—— 会上只会问**效果／风险／资源／取舍**四类，"
+                f"每类至少预演一条，答法要**≤3 句且含数字**（会上没人听长句）。"
+                f"**答不上来的问题，就是方案最薄的地方。**")
+    else:
+        # 8.15 是**按档位条件生成**的（大赛／G端 各有自己的问答章）—— 缺失不算错，只提示。
+        if not quiet:
+            print(f"  {INFO} 决策人问答预判：本档未生成（大赛／G端 用各自原有的问答章）")
+    # 29b 一页 creative brief（体系2 #3）—— 骨架原先从「洞察」直接跳到「定位」
+    _cb = _sec_any("创意简报")
+    if _cb:
+        _six = ["SMP", "target", "barrier", "RTB", "mandatories", "success"]
+        _misss = [k for k in _six if not re.search(k, _cb, re.I)]
+        _n_smp = len(re.findall(r"(?m)^\s*-\s*\*\*SMP", _cb))
+        if _n_smp > 1:
+            _misss.append(f"SMP 写了 {_n_smp} 条（只能 1 条）")
+        # ⚠️ 2026-09-19：初版只查「六个字段名在不在」—— 而**骨架自己的标签里就写着这六个词**
+        #   （`- **SMP（单一营销命题）**：{FILL}`）→ 于是**未填的骨架也照样通过**（判据空转）。
+        #   → 必须查**标签背后有没有内容**：每条 ≥6 实字，且 success 要带数字。
+        # ⚠️ 2026-09-19 再踩一次：`\s*` **会吃掉换行** —— 写成 `[：:]\s*(.*)$` 时，
+        #   空字段会**把下一行的内容抓过来当自己的**（`barrier` 留空 → 抓到 RTB 那一行），
+        #   于是「留空」照样通过。**判断「本行有没有内容」一律用 `[ \t]*`，不要用 `\s*`。**
+        _empty = []
+        for _k in _six:
+            _m = re.search(r"(?m)^[ \t]*-[ \t]*\*\*" + _k + r"[^\n]*?\*\*[：:][ \t]*(.*)$",
+                           _cb, re.I)
+            if _m and _zh(_m.group(1)) < 6:
+                _empty.append(_k)
+        if _empty:
+            _misss.append("字段没内容：" + "／".join(_empty))
+        _succ = re.search(r"(?mi)^[ \t]*-[ \t]*\*\*success[^\n]*?\*\*[：:][ \t]*(.*)$", _cb)
+        if _succ and not re.search(r"\d", _succ.group(1)):
+            _misss.append("success 没数字")
+        if not quiet:
+            print(f"  {OK if not _misss else NG} 创意简报："
+                  f"{'六字段齐＋有内容＋SMP 唯一' if not _misss else '缺 ' + '／'.join(_misss)}")
+        if _misss:
+            _hard_if_full(
+                f"创意简报缺「{'／'.join(_misss)}」—— 六字段：**SMP**（单一营销命题，"
+                f"**只能一条**）／**target**（此刻的他，不是人群画像）／**barrier**（他不买的真实理由）／"
+                f"**RTB**／**mandatories**（口径·禁用词·必带元素·时长）／**success**（含数字）。"
+                f"SMP 写两条＝没有主张。")
+    else:
+        if not quiet:
+            print(f"  {NG} 创意简报：**未找到二·十**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「二·十 · 创意简报（一页）」—— 没有这一页，写创意的人只能自己发挥："
+                      "对谁说、他不买的理由、凭什么信、哪些必须遵守，一条都没有落纸。")
+    # 29c 结案移交与后续 90 天（体系1 #8）—— 全仓原先零「移交／交接」字段
+    _hd = _sec_any("结案移交")
+    if _hd:
+        _misss = []
+        if not re.search(r"账号|后台|投放账户|权限", _hd):
+            _misss.append("账号与权限怎么转")
+        if "未结" not in _hd:
+            _misss.append("未结事项")
+        if not re.search(r"信号|触发", _hd):
+            _misss.append("90 天什么信号算要改")
+        if "回流" not in _hd:
+            _misss.append("复盘回流")
+        if not quiet:
+            print(f"  {OK if not _misss else NG} 结案移交："
+                  f"{'账号权限＋未结事项＋信号＋回流齐' if not _misss else '缺 ' + '／'.join(_misss)}")
+        if _misss:
+            _hard_if_full(
+                f"结案移交缺「{'／'.join(_misss)}」—— **交付不是终点，交接完才算**："
+                f"文件在哪、版本怎么认、**账号与权限转给谁**（平台后台／投放账户／私域工具／素材库）、"
+                f"未结事项（还在跑的活动、未付的款、未签的合同）；后续 90 天要写**谁在看、看哪几个数、"
+                f"什么信号算「要改」**，以及哪些结论要回流到知识库。不写，方案交付即失联。")
+    else:
+        if not quiet:
+            print(f"  {NG} 结案移交：**未找到 8.16**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「8.16 结案移交与后续 90 天」—— 交付后谁接手、账号权限怎么转、"
+                      "90 天看什么，全都没有；客户内部接不住，方案就停在纸上。")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

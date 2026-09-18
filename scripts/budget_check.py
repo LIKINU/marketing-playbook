@@ -164,6 +164,7 @@ def main():
 
     # ── R2-8：从成稿里**回读**单位经济（原实现只认 JSON 的 unit_economics，
     #    于是成稿里写的「单客获取成本 X 元」永远不会被复算 —— 写错也全绿）
+    _ue_missing = []
     if md is not None and not data.get("unit_economics"):
         _ue = {}
         # ⚠️ 2026-09-17 修 BUG（投资人视角第 1 条，实测会崩）：
@@ -177,8 +178,13 @@ def main():
             if _m and _m.group(1):
                 _ue[_k] = float(_m.group(1))
         # 读不到 CAC 或 LTV → 报出来（原先静默跳过，等于「没算」也算过）
+        # ⚠️ 2026-09-19 修（A 批 · 投资人视角第 1 条）：原先**只印一行 NG 就走了**，
+        #    `failed` 根本没被置位 → 单位经济缺失**不拦出稿**，等于「没算也算过」。
+        #    这里先记标志，等 `failed` 定义处再并进去（它在本段之后才定义）。
+        _ue_missing = []
         for _need in ("cac", "ltv"):
             if _need not in _ue:
+                _ue_missing.append(_need.upper())
                 print(f"  {NG} 成稿里读不到「{_need.upper()}」—— 单位经济无法复算，请补齐五项")
         if len(_ue) >= 2:
             data["unit_economics"] = _ue
@@ -256,6 +262,17 @@ def main():
 
     total = data.get("total")
     failed = bool(oc_bad)      # 口径问题也算失败（R2-9）
+    if _ue_missing:
+        # ⚠️ 只在**完整版**强制（2026-09-19 实测踩到）：起初无条件置 failed，
+        #   结果速览类标杆稿（本就没有单位经济章，也不该有）被误拦、冒烟挂 1 项。
+        #   判据与 selfcheck 的 `_is_full_hint` 保持一致：四章齐才算完整版。
+        _is_full = all(x in md for x in ("现状分析", "策略", "定位与口径", "预算明细"))
+        if _is_full:
+            print(f"  {NG} 单位经济缺失：{_ue_missing} —— 完整版方案的第十四章必须给全五项"
+                  f"（CAC／LTV／毛利率／客单价／回本周期），否则无法复算。")
+            failed = True
+        else:
+            print(f"  {WARN} 未见单位经济「{'／'.join(_ue_missing)}」（速览类快案不强制）")
 
     if total is None:
         print(f"  {'表内合计':<24} {'(未提供)':>12}")

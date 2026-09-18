@@ -149,9 +149,35 @@ BANNED_PROMISE_RE = [
 # 财务／统计语境白名单：命中则从扫描文本挖掉
 # （例：「保本单量」是财务术语，不是金融产品的「保本」承诺 —— 不豁免会一直误报）
 BANNED_WHITELIST_PATTERNS = [
-    r"保本(单量|销量|销量|点|点|线|线|值|门槛|门槛|测算|测算|单数|单数|分析)",
-    r"回本(周期|周期|单量|销量|销量|点|点|时间|时间|线|线)",
+    r"保本(单量|销量|点|线|值|门槛|测算|单数|分析)",
+    r"回本(周期|单量|销量|点|时间|线)",
+    # ⚠️ 2026-09-19（六体系核对 · 体系6 agent 报「空骨架自报 13 个违规词」）——实测四类误报，
+    #   全部**不是真违规**，但会被判成硬错误（真稿交付前被拦下来）：
+    #   ① **子串误命中**：`历史上最真实` 含 `史上最`；`为每层定唯一目标` 含 `唯一`
+    #      （中文没有词边界，只能把**已知的合法长词**列进来抵消）；
+    #   ② **框架词**：`最强反方论点` 是骨架自己的字段名（Red Team 那三条）；
+    #   ③ **引用／否定**：`不诱导分享`、`不向个人号收款` —— 那是在**引述被禁止的做法**；
+    #   ④ **规则说明**：`不写留存期限＝默认永久保存` —— 那是在**讲规则**。
+    #   → ①② 用这里的白名单抵消；③ 由下面的「否定语境」规则处理；
+    #     ④ 与 ③ 同类（含「禁」「不得」字样）也归否定语境。
+    #   **判准：判据要拦的是「我们这么宣称」，不是「我们说别人不能这么宣称」。**
+    r"历史上最真实",
+    r"最佳真我",
+    r"唯一目标",
+    r"唯一要拿到的结果",
+    r"唯一发声人",
+    r"唯一对外发声口",
+    r"最强反方论点",
+    r"最强反方",
+    r"永久保存",
 ]
+# ⚠️ 规矩（给以后加章节的人）：**新增的字段名／表头若含禁词，把它加进上面这张表**。
+#   字段名是「我们要填什么」，不是「我们宣称什么」——两者必须分开。
+
+# 「否定/引用语境」标记：某个违规词**在本文里的每一次出现**都紧跟在这些字后面 →
+#   它是在被引述、不是在被使用 → 不计为违规。
+NEG_CTX = ("不", "禁", "不得", "不能", "勿", "避免", "杜绝", "反对", "拒绝", "严禁")
+NEG_WINDOW = 8
 
 
 def read(path):
@@ -362,12 +388,64 @@ def main():
         if any(c in ln for c in BANNED_CONTEXT_SAFE) or ln.strip().startswith(("- 禁用", "| 禁用", "- 不能")):
             for j in range(max(0, i - 1), min(len(lines), i + 2)):   # ±1 行（原 ±2）
                 safe_idx.add(j)
+    # ⚠️ 2026-09-19（六体系核对 · 体系6 agent 报「空骨架自报 13 个违规词」）——
+    #   ±1 行的豁免**盖不住两整类**，实测都会把真稿误伤成硬错误：
+    #   ① **禁语表整块**：3.2 的禁用词表、3.5 的「本行业禁语」里**必须原样写出违规说法**
+    #      （不然一线不知道什么不能说），而 ±1 行只护住表头附近 → 表体里的违规词照样被判。
+    #   ② **表头行**：表头是「字段名」不是「对外的宣称」。实测
+    #      `| 阶段 | 起止 | 主推渠道 | 该段预算 | 该段唯一要拿到的结果 |` 会把 `唯一` 判成违规。
+    #   → 处置：**表头/分隔行整行排除**；**整张表块**只要表头或紧邻上一行含禁用类标记，则全块排除。
+    #   **判准：判据要拦的是「我们这么宣称」，不是「我们说别人不能这么宣称」。**
+    _i = 0
+    while _i < len(lines):
+        if lines[_i].strip().startswith("|"):
+            _j = _i
+            while _j < len(lines) and lines[_j].strip().startswith("|"):
+                _j += 1
+            safe_idx.add(_i)                                   # 表头行（字段名）
+            for _k in range(_i, _j):
+                if "---" in lines[_k]:
+                    safe_idx.add(_k)                           # 分隔行
+            _i = _j
+            continue
+        _i += 1
+
+    _BAN_MARK = ("禁用", "禁止", "不能说", "红线", "不得", "违规后果", "违规", "违法")
+    _i = 0
+    while _i < len(lines):
+        if lines[_i].strip().startswith("|"):
+            _j = _i
+            while _j < len(lines) and lines[_j].strip().startswith("|"):
+                _j += 1
+            _hdr = lines[_i]
+            _prev = ""
+            for _k in range(_i - 1, -1, -1):
+                if lines[_k].strip():
+                    _prev = lines[_k]
+                    break
+            if any(m in _hdr or m in _prev for m in _BAN_MARK):
+                for _k in range(_i, _j):
+                    safe_idx.add(_k)
+            _i = _j
+            continue
+        _i += 1
     scan_text = "\n".join(ln for i, ln in enumerate(lines) if i not in safe_idx)
     # 套用财务／统计语境白名单（避免「保本单量」这类术语误报）
     for pat in BANNED_WHITELIST_PATTERNS:
         scan_text = re.sub(pat, "", scan_text)
     found = sorted({b for b in banned if b and b in scan_text})
     hard_found = sorted({b for b in BANNED_HARD if b and b in scan_text})
+
+    # ③ 否定/引用语境：某词**每一次**出现都在「不／禁／不得／不能…」之后 → 是在引述，不是在使用。
+    def _all_quoted(_w):
+        for _m in re.finditer(re.escape(_w), scan_text):
+            _pre = scan_text[max(0, _m.start() - NEG_WINDOW):_m.start()]
+            if not any(_n in _pre for _n in NEG_CTX):
+                return False
+        return True
+
+    found = [w for w in found if not _all_quoted(w)]
+    hard_found = [w for w in hard_found if not _all_quoted(w)]
     # 正则类（名次式／外语／效果承诺）—— 与词表同等对待，都是硬错误
     for _pat in BANNED_HARD_RE + BANNED_PROMISE_RE:
         for _m in re.finditer(_pat, scan_text):

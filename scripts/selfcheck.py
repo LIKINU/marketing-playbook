@@ -1908,6 +1908,41 @@ def main():
         if not quiet:
             print(f"  {NG} 评论区与私信值守：**未找到这一节**（骨架会给，缺了就是被删了）")
 
+    # 27) B 批：治理节奏与变更控制（2026-09-19）
+    #     8.13 变更记录是**日志**（改了什么），8.14 是**规则**（怎么提、谁批、几天答复、什么算范围外）。
+    #     两者缺一不可：只有日志没有规则，等于「事后都记着，事中没人拦」。
+    _gov = _sec25("变更控制与范围边界")
+    if _gov:
+        _miss = [k for k in ("谁批", "答复时限", "工作量归属") if k not in _hdr_of(_gov)]
+        # 范围边界与争议升级是挡范围蔓延的两条，缺了就等于「什么都做」
+        # ⚠️ **不能只查「这一节里有没有这几个字」** —— 「范围边界」四个字就写在标题
+        #    `### 8.14 变更控制与范围边界` 里，查整节**永远通过**（判据空转）。
+        #    必须锚到**那两条 bullet 的形态**：行首 `- **范围边界**`。
+        _gov_body = _gov.split("\n", 1)[1] if "\n" in _gov else ""
+        if not re.search(r"(?m)^\s*-\s*\*\*范围边界\*\*", _gov_body):
+            _miss.append("范围边界")
+        if not re.search(r"(?m)^\s*-\s*\*\*争议升级\*\*", _gov_body):
+            _miss.append("争议升级")
+        # 评审节奏：≥2 行、且**带日期**（不带时间的「初稿评审」等于没有节奏）
+        _rv = _gov.split("评审节奏", 1)[-1] if "评审节奏" in _gov else ""
+        _rv_rows = [r for r in _rv.split("\n")
+                    if r.strip().startswith("|") and "---" not in r and "节点" not in r]
+        if len(_rv_rows) < 2:
+            _miss.append("评审节奏≥2 行")
+        elif not any(re.search(r"\d", r) for r in _rv_rows):
+            _miss.append("评审节奏要带日期")
+        if not quiet:
+            print(f"  {OK if not _miss else NG} 变更治理："
+                  f"{'变更流程＋评审节奏＋范围边界齐' if not _miss else '缺 ' + '／'.join(_miss)}")
+        if _miss:
+            _hard_if_full(f"变更治理缺「{'／'.join(_miss)}」—— **方案签完不是结束，是变更开始**："
+                          f"要写清变更**谁批／几天内答复／影响哪几节／算范围内还是新增工作量**（不写工作量归属，"
+                          f"客户随口加一个渠道就会变成默默做三个月）；还要写**评审节奏**（带日期）与"
+                          f"**范围边界**（本方案不做什么）、**争议升级**（谁裁、几个工作日出结论）。")
+    else:
+        if not quiet:
+            print(f"  {NG} 变更控制与范围边界：**未找到这一节**（骨架会给，缺了就是被删了）")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

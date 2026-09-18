@@ -30,6 +30,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paradigm_data as _PD   # noqa: E402  范式库（六档骨架指引，见 build_paradigm.py）
+# 受监管行业的资质与宣称边界（2026-09-19 · C 批「体系6 #2」）——
+#   原先「合规角色读到了案例，却没有字段承接」，医美／保健食品／教育客户拿到的骨架
+#   与茶饮客户一模一样。这份数据表把「行业 → 资质／禁语／依据」变成可注入的章节。
+# ⚠️ 导入失败**不阻断出稿**（数据表缺失时退化为「不注入这一节」，由 selfcheck 兜底报警）。
+try:
+    import industry_rules as _IND   # noqa: E402
+except Exception as _e:             # pragma: no cover
+    # 数据表缺失**不阻断出稿**（缺的是「行业专门规定」这一节，不是主线能力），
+    # 但**必须说出来** —— 静默降级会让「受监管行业客户没拿到资质章」看起来像正常结果。
+    print(f"{WARN} 未能加载 industry_rules（{type(_e).__name__}: {_e}）—— "
+          f"受监管行业不会注入 3.5 行业资质与宣称边界", file=sys.stderr)
+    _IND = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REF = os.path.join(HERE, "..", "references")
@@ -1542,7 +1554,8 @@ def build_skeleton(rules, plays, kmap, tier, cardpoints, scene=""):
     #   看到的是两张空表，看不到「方案的核心判断」，容易被判「没有结论」。
     #   → 把 〇 章移到现状分析之后：先给判断，再给推导。
     body = (head + diagnosis + zeroth + strategy + insight + brief + positioning + reach + creative + copy_
-            + kpi + budget + exec_ + scene_body(scene, client, probe_traits(rules)))
+            + kpi + budget + exec_ + scene_body(scene, client, probe_traits(rules),
+                                                detect_industry(rules)))
     return body
 
 
@@ -1920,11 +1933,62 @@ TRAIT_PATTERNS = [
 
 
 def probe_traits(rules):
-    """从《任务规则表》**全文**抽客户特征。只读文本，不改门禁、不改档位。"""
+    """从《任务规则表》**全文**抽客户特征。只读文本，不改门禁、不改档位。
+
+    ⚠️ 2026-09-19 起多一个**动态特征**：`受监管行业` —— 它的关键词表在
+    `industry_rules.INDUSTRIES`（12 类），命中即置位；它注入的章节**内容随行业不同**，
+    所以不放进 `TRAIT_SECTIONS`（那是静态串），改由 `scene_body` 动态渲染。
+    """
     if not isinstance(rules, dict):
         return []
     blob = json.dumps(rules, ensure_ascii=False)
-    return [name for name, kws in TRAIT_PATTERNS if any(k in blob for k in kws)]
+    out = [name for name, kws in TRAIT_PATTERNS if any(k in blob for k in kws)]
+    if _IND and detect_industry(rules):
+        out.append("受监管行业")
+    return out
+
+
+def _industry_blob(rules):
+    """行业判定只看**决定性字段**，不看整份 JSON。
+
+    ⚠️ 2026-09-19 实测教训：一开始拿整份规则表做关键词计数 ——
+    把一份 **SaaS** 客户的表（其余字段留着示例模板里的「茶饮」字样）喂进来，
+    照样判成「餐饮食品」并注入一节**错的**行业规定。
+    比「漏判」更坏的是「错判」：错的那一节会让填稿的人去核不相关的资质。
+    → 只取「客户名 ＋ 卖什么 ＋ 卖给谁 ＋ 卡在哪 ＋ 显式行业」——
+      这五项在任何一份表里都是**本案专属**的，模板残留影响不到。
+    """
+    if not isinstance(rules, dict):
+        return ""
+    parts = [str(rules.get("client") or rules.get("客户") or "")]
+    g = rules.get("gate") or rules.get("门禁") or {}
+    if isinstance(g, dict):
+        for k, v in g.items():
+            if any(t in str(k) for t in ("卖什么", "卖给谁", "行业", "品类", "主营",
+                                         "卡在哪", "卡点", "卖给谁")):
+                parts.append(str(v))
+    for k in ("governance", "治理", "治理块"):
+        v = rules.get(k)
+        if isinstance(v, dict):
+            parts.append(str(v.get("客户行业") or ""))
+    return " ".join(parts)
+
+
+def detect_industry(rules):
+    """回 `industry_rules` 的行业 key（无命中或模块缺失则 None）。
+
+    ⚠️ **门禁里的「客户行业」优先**（`explicit_from`），关键词计数只是回退 ——
+    理由见 `industry_rules.detect` 与 `_industry_blob` 的说明（实测医美客户会被模板里
+    残留的「茶饮」带走、SaaS 客户被判成餐饮）。
+    所以 `gate_check.py` 把「客户行业」「已持资质」列成**补充项**：
+    门禁 13 项是不变式，但这两项填了，行业判定就从「猜」变成「读」。
+    """
+    if not _IND or not isinstance(rules, dict):
+        return None
+    try:
+        return _IND.detect(_industry_blob(rules), explicit=_IND.explicit_from(rules))
+    except Exception:
+        return None
 
 
 # 每个特征对应的**必挂章节**。`{FILL}` 与 SCENE_SECTIONS 同一约定（由 scene_body 替换）。
@@ -2025,19 +2089,32 @@ def _drop_existing(block, base):
     return "\n".join(out)
 
 
-def scene_body(scene, client="", traits=()):
+def scene_body(scene, client="", traits=(), industry=None):
     """按交付场景返回「这一类方案必须有的章节」。
 
     没有这些章节，方案就是**不完整**的 —— 跟打法写得好不好无关。
 
     ⚠️ 2026-09-19 起多一个 `traits` 维度：**能力按客户特征触发，不再按档位分配**。
     理由见 `TRAIT_SECTIONS` 上方的注释（连锁客户被判进 B 端档会拿不到稽核表）。
+    `industry`（受监管行业 key）用于动态渲染 `3.5 行业资质与宣称边界`。
     """
     # ⚠️ SCENE_SECTIONS 是普通字符串（不是 f-string），`{FILL}` 是**字面占位符**，
     #    必须在这里换成真的 `【填】` —— 否则交付稿里会出现 `{FILL}` 这种鬼东西。
     base = SCENE_SECTIONS.get(scene, SCENE_SECTIONS["B端"]).replace("{FILL}", FILL)
     extra = "".join(_drop_existing(TRAIT_SECTIONS[t].replace("{FILL}", FILL), base)
                     for t, _kws in TRAIT_PATTERNS if t in traits)
+    # 受监管行业：内容随行业变化，所以走动态渲染（不放进 TRAIT_SECTIONS 的静态串）。
+    # ⚠️ 只判「有没有命中受监管行业」，**不判是哪个行业** —— 长尾行业也注入 GENERIC 版
+    #    （「先去核资质」这件事对所有客户都成立，只是受监管行业更需要）。
+    if "受监管行业" in traits and _IND:
+        try:
+            extra += _drop_existing(_IND.section(industry).replace("{FILL}", FILL), base)
+        except Exception as e:
+            # ⛔ **不静默**（optimize_scan 会抓 `except: pass`）：行业章节渲染失败必须说出来，
+            #    否则调用方看到的是「这一档没有 3.5」＝「这是普通行业」，而事实是**渲染炸了**。
+            print(f"{WARN} 行业资质章节渲染失败（{type(e).__name__}: {e}）—— "
+                  f"本档缺 3.5 行业资质与宣称边界，selfcheck【30】会报；"
+                  f"检查 scripts/industry_rules.py 的 section()")
     return base + extra
 
 

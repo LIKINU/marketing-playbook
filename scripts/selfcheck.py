@@ -2310,6 +2310,60 @@ def main():
         _hard_if_full("缺「8.16 结案移交与后续 90 天」—— 交付后谁接手、账号权限怎么转、"
                       "90 天看什么，全都没有；客户内部接不住，方案就停在纸上。")
 
+    # 30) C 批第三批：受监管行业的资质与宣称边界（体系6 #2 · 2026-09-19）
+    #     内容由 composer 按行业动态注入（`scripts/industry_rules.py`，12 类受监管行业）。
+    #     ⚠️ 这一关**判不了「行业判得对不对」**（那要靠门禁的「客户行业」），
+    #        它判的是「结构够不够格」＋「漏了要能提醒」。
+    _ir = _sec_any("行业资质与宣称边界")
+    # 交付稿里的强行业信号（用于「没挂这一节但看起来是受监管行业」的提醒）
+    _SIG = (r"医美|医疗机构执业|医疗广告审查|保健食品|保健功能|食品经营许可|食品生产许可|"
+            r"办学许可|民办学校|化妆品备案|国妆|特殊化妆品|基金销售|金融许可|理财|"
+            r"预售许可|商品房预售|商业特许经营|特许经营备案|农药登记|种子生产经营|"
+            r"互联网药品信息服务|药品经营许可|医疗器械经营")
+    if _ir:
+        _h_ir, _rows_ir = _tbl(_ir)
+        _misss = []
+        for _k in ("资质名称", "持有", "证书编号"):
+            if not any(_k in c for c in _h_ir):
+                _misss.append(f"资质表缺「{_k}」列")
+        _i_ban = _col(_h_ir, "禁止", "禁用")
+        _ban_sec = ""
+        _mm = re.search(r"(?ms)\*\*②[^\n]*\n(.*?)(?=\*\*③|\Z)", _ir)
+        if _mm:
+            _ban_sec = _mm.group(1)
+        _bans_rows = [r for r in _ban_sec.split("\n")
+                      if r.strip().startswith("|") and "---" not in r and "禁止" not in r]
+        if len(_bans_rows) < 3:
+            _misss.append(f"禁语表只有 {len(_bans_rows)} 行（需 ≥3）")
+        if "替换说法" not in _ir:
+            _misss.append("禁语没写「替换说法」")
+        if not re.search(r"识别为受监管行业[:：]\s*\S", _ir):
+            _misss.append("没写识别成哪个行业")
+        if "依据" not in _ir:
+            _misss.append("没写依据（法规／平台规则）")
+        if not quiet:
+            print(f"  {OK if not _misss else NG} 行业资质与边界："
+                  f"{'资质五列＋≥3 条禁语＋行业名＋依据齐' if not _misss else '缺 ' + '／'.join(_misss)}")
+        if _misss:
+            _hard_if_full(
+                f"受监管行业的「3.5 行业资质与宣称边界」不达标：{'／'.join(_misss)} —— "
+                f"3.2 那张表是**全行业通用**的禁用词，受监管行业还要**本行业专门规定**："
+                f"资质清单要写「我方持有？」与「证书编号／有效期」（**没证的现在就得知道**），"
+                f"禁语要写**替换说法**（只写「不能说什么」＝一线不知道能说什么），"
+                f"并写明识别成哪个行业与依据（法规＋平台规则，平台侧通常更严）。")
+    else:
+        _hit = re.search(_SIG, body)
+        if _hit:
+            if not quiet:
+                print(f"  {WARN} 行业资质与边界：交付稿出现受监管信号「{_hit.group(0)}」"
+                      f"但**没有 3.5 这一节**")
+            _hard_if_full(
+                f"交付稿出现受监管信号「{_hit.group(0)}」，却没有「3.5 行业资质与宣称边界」—— "
+                f"`composer` 只在识别到受监管行业时才注入这一节（12 类，见 `industry_rules.py`）；"
+                f"请在《任务规则表》里补**「客户行业」**（显式声明优先于关键词计数）再重跑组装。")
+        elif not quiet:
+            print(f"  {INFO} 行业资质与边界：非受监管行业，本档未生成（走通用禁用词表）")
+
     # ── 结论
     print("\n" + "=" * 64)
     if hard_errors:

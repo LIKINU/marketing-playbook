@@ -51,8 +51,11 @@ os.chdir(ROOT)
 WARNINGS = []
 
 # ── 扫描范围 ────────────────────────────────────────────────────────────────
-# 这些目录不扫：.git 是版本历史；.workbuddy 是私有笔记；优化记录是过程记录
-SKIP_DIRS = {".git", ".workbuddy", "优化记录", "__pycache__", "node_modules"}
+# 这些目录不扫：.git 是版本历史；.workbuddy 是私有笔记；优化记录是过程记录；
+#   `解析产物` 是**本地工作稿**（把书／长文拆成一节节的中间产物，已进 .gitignore 不入库）。
+#   ⚠️ 2026-09-19 加 `解析产物`：它一直没入库、零入链，却让本脚本**每轮都报「孤儿档 118.3 KB」**
+#      —— 噪声会把真问题埋掉（看久了就没人看这一段了）。
+SKIP_DIRS = {".git", ".workbuddy", "优化记录", "__pycache__", "node_modules", "解析产物"}
 TEXT_EXT = {".md", ".py", ".json", ".sh", ".txt", ".html", ".yml", ".yaml", ".csv"}
 
 # ── 入口档：一定是「被引用」的角色，不查入链 ─────────────────────────────────
@@ -281,7 +284,7 @@ def report(res, verbose=True):
     print("仓库冗余／卫生扫描 · repo_hygiene.py")
     print("（既有校验脚本查『内容对不对』；本脚本查『这个文件该不该存在』）")
     print("=" * 72)
-    print(f"  扫描范围：{res['total']} 个文件（已排除 .git／.workbuddy／优化记录／__pycache__）")
+    print(f"  扫描范围：{res['total']} 个文件（已排除 .git／.workbuddy／优化记录／解析产物／__pycache__）")
 
     print(f"\n① 孤儿档（全仓零入链引用）：{len(orphans)} 个，"
           f"{human_size(sum(o['size'] for o in orphans))}")

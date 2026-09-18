@@ -170,6 +170,37 @@ def main():
     if extra:
         print(f"\nℹ️  另有未匹配字段（可能对应上面某项，请人工确认）：{'、'.join(map(str, extra))}")
 
+    # ── 补充项（**不并进门禁 13 项**，只匹配＋提示）───────────────────────────
+    # ⚠️ 与「对接人与决策人」同一套做法（2026-09-17）：13 项是**全局不变式**，
+    #   SKILL／README／《流程状态》行都写 13，加一项要连带改一圈。
+    #   但这两项**填了就不一样**：
+    #     · 「客户行业」→ `composer.detect_industry()` **优先读它**（显式声明优先于关键词计数）。
+    #       实测：医美客户因为模板里残留「茶饮」字样，被关键词计数判成了「餐饮食品」。
+    #     · 「已持资质」→ 受监管行业客户要挂 `3.5 行业资质与宣称边界`，没这一项只能填【填】。
+    EXTRA_ITEMS = [
+        ("客户行业（受监管行业必填）",
+         ["客户行业", "所属行业", "行业类型", "行业"]),
+        ("已持资质（有证先列出来，没有的也要知道要办什么）",
+         ["已持资质", "持有资质", "资质", "证照", "许可"]),
+    ]
+    used2 = set()
+    got_extra = []
+    for label, aliases in EXTRA_ITEMS:
+        k, v = match_item(gate, aliases, used2)
+        if k is not None:
+            used2.add(k)
+        got_extra.append((label, k, v))
+    if any(k is None or not is_filled(v) for _l, k, v in got_extra):
+        print("\n" + "-" * 64)
+        for label, k, v in got_extra:
+            if k is None or not is_filled(v):
+                print(f"{OPT} 补充项未填：{label}")
+        print(f"{OPT} 这两项**不拦流程**，但受监管行业（餐饮食品／医美医疗／药品器械／保健食品／"
+              f"化妆品／教育／金融／房地产／酒类／加盟招商／农资／烟草）客户的")
+        print("   交付稿会缺「3.5 行业资质与宣称边界」这一节 —— 建议问一句再动笔。")
+        print("   问法：\"你们属于哪个行业？手上已经有哪些资质证照（食品经营许可／"
+              "医疗机构执业许可／办学许可／特许经营备案…）？\"")
+
     print("\n" + "-" * 64)
     print(f"规则表确认状态：{'已确认 ' + OK if confirmed else '尚未确认 ' + NG}")
 

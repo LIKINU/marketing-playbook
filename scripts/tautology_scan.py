@@ -95,7 +95,7 @@ def run_selfcheck(path):
     return verdicts, crashed
 
 
-OK, NG, WARN, INFO = "✅", "❌", "⚠️", "ℹ️"
+from _common import OK, NG, WARN, INFO   # noqa: E402  统一符号，不要各自重定义
 
 
 def main():

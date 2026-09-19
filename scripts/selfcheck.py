@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import traceback
 
 from _common import (OK, NG, WARN, HINT, INFO, VAGUE_WORDS, AI_SMELL_WORDS,
                      CAUSAL_WORDS, GENERIC_CATEGORY_WORDS,
@@ -206,6 +207,181 @@ def emit_json(hard, warns, code):
         print(json.dumps({"exit": code, "hard_errors": hard, "warnings": warns}, ensure_ascii=False))
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 公共助手（**模块级 —— 必须在所有判据之前就位**）
+#   ⚠️ 2026-09-19 根治：原先这几个助手是**嵌在 selfcheck() 里的嵌套函数**，于是「定义在函数体中部、
+#     而更早的判据调用它」→ `UnboundLocalError`。本仓库为此**栽过四次**
+#     （`_hard_if_full`／`_tbl`／`_is_ph`／`_data_text`）——每次都是「改完才发现某个更早的关也在用」。
+#     → 迁到模块级，**位置不再影响可用性**；新助手一律加在这里。
+# ═══════════════════════════════════════════════════════════════════
+
+def _zh(s):
+    return len(re.findall(r"[\u4e00-\u9fff]", s))
+
+# 表格小工具（15f／【28】共用）—— 同样必须在所有判据之前定义。
+def _cells(line):
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+_PH = re.compile(r"^(?:占位|待补|待定|待确认|TBD|Todo|N/?A)$", re.I)
+
+
+def _is_ph(s):
+    s = (s or "").strip()
+    if "【填】" in s:
+        return True
+    _t2 = re.sub(r"[*\s]", "", s)
+    return (not _t2) or bool(_PH.match(_t2))
+
+def _data_text(sec):
+    """回「**内容层**」文本 —— 判断「有没有写」时应该看这里，而不是看整节。
+
+    ⚠️ 为什么必须有这个助手（2026-09-19 · 六体系取证报告）：报告里有 25 处判据
+    **空骨架也 ✅**，取证结论是「它们查的字符串就印在骨架的表头/标题/注释里」。
+    实测确认了 8 个关键词**只出现在表头或标题或注释**中（`经验参考值`／`平台健康阈值`／
+    `敏感性分析`／`结算方式`／`切点`／`核销成本`／`自下而上`／`钩子类型`）→ 判据**永真**。
+
+    本函数排除三层、只留内容：
+      · **标题行**（`#` 开头）与**注释行**（`>` 开头）—— 那是「要求」，不是「填写」；
+      · **表头行与分隔行** —— 那是「字段名」，不是「内容」；
+      · **每行的第一格** —— 骨架常把行首预填成标签（角色列、阶段名），
+        排除它才不会被「预填标签自证」骗过（与【31】的规则②同一考虑）。
+    """
+    _ls = sec.split("\n")
+    # ⚠️ `_sec_any()` 回的是「**标题文字** ＋ 正文」，而标题**不带 `#`** ——
+    #   所以必须显式砍掉第一行，否则**标题里的词会被当成内容**
+    #   （实测：「5.1 同一母题…各渠道的不同形态」这一行把 `钩子类型` 送进了内容层）。
+    if _ls and not _ls[0].lstrip().startswith(("#", "|", ">")):
+        _ls = _ls[1:]
+    out = []
+    _i = 0
+    while _i < len(_ls):
+        _s = _ls[_i].strip()
+        if _s.startswith("|"):
+            # 表块：**第一行是表头（字段名）、第二行是分隔行** —— 两者都不是内容。
+            # （这一条是初版的第二个漏洞：不跳表头 → 表头里的词照样自证。）
+            _i += 1
+            while _i < len(_ls) and _ls[_i].strip().startswith("|"):
+                _r = _ls[_i].strip()
+                if "---" not in _r:
+                    _cs = _cells(_r)
+                    out.extend(_cs[1:] if len(_cs) > 1 else _cs)
+                _i += 1
+            continue
+        if _s and not _s.startswith(("#", ">", "-", "*")):
+            out.append(_s)
+        _i += 1
+    return " ".join(out)
+
+def _row_ok(sec, label):
+    """表里有没有「**第一格含 label 且其余格至少一个非空**」的数据行。
+
+    用途：一大批判据查的是「**行标签在不在**」（如「安全库存线」「授权起止」「合法性基础」）——
+    而那些标签**骨架就预填好了**，所以「标签在」＝「骨架给了位」，**不等于「有人填了」**。
+    判「写了没有」必须要求**标签之外至少一格有内容**。
+    """
+    for _ln in sec.split("\n"):
+        _s = _ln.strip()
+        if not _s.startswith("|") or "---" in _s:
+            continue
+        _cs = _cells(_s)
+        if _cs and label in _cs[0] and any(not _is_ph(c) for c in _cs[1:]):
+            return True
+    return False
+
+def _field_ok(sec, label):
+    """标签出现且**标签后面有内容** —— 支持骨架里实际存在的三种写法：
+
+      · `- **标签**：内容`
+      · `> **版本**：v1　｜　**编制**：张三　｜　**审核／签批**：李四`（同一行多个粗体段）
+      · `**三段排期**（预热／引爆／承接）：`（独立成行、不带前导符号）
+
+    ⚠️ 2026-09-19 修：初版只认第一种（行首 `- **标签**：` 那种）—— 于是
+    「缺口持续」「编制」「三段排期」这些**真实写法**全被判「缺」，
+    在**机械填满的稿**上一次冒出 21 项硬错误（误报）。
+    """
+    _ls = sec.split("\n")
+    for _i, _ln in enumerate(_ls):
+        for _m in re.finditer(r"\*\*([^*]{1,40})\*\*", _ln):
+            if label not in _m.group(1):
+                continue
+            _after = _ln[_m.end():]
+            _m2 = re.match(r"[^：:=]{0,24}[：:=]\s*(.*)$", _after)
+            if _m2 and _zh(_m2.group(1)) >= 2:
+                return True
+            # 内容写在**下面**的三种情况：
+            _nxt = -1
+            for _j in range(_i + 1, len(_ls)):
+                if _ls[_j].strip():
+                    _nxt = _j
+                    break
+            if _nxt < 0:
+                continue
+            _s2 = _ls[_nxt].strip()
+            if _s2.startswith(("-", "*")) and _ls[_nxt].startswith((" ", "\t")):
+                return True                      # 缩进的嵌套 bullet
+            if _s2.startswith("|"):
+                # 紧邻的**表块里有没有数据行** —— 表头／分隔行不算数据。
+                # （掏空稿里标签下面只剩表头＋分隔行 → 正确地判「没内容」；
+                #   填好的稿子表块里有数据行 → 判「有内容」。）
+                _blk, _k = [], _nxt
+                while _k < len(_ls) and _ls[_k].strip().startswith("|"):
+                    _blk.append(_ls[_k].strip())
+                    _k += 1
+                if len([1 for _r in _blk if "---" not in _r]) >= 2:
+                    return True
+                continue
+            if not _s2.startswith(("#", ">")):
+                return True                      # 普通段落
+    return False
+
+
+def _col_ok(sec, kw, need=1):
+    """表头里含 kw 的**那一列**，在该表的数据行里至少有 `need` 格非空/非占位。
+
+    ⚠️ 2026-09-19 集成测试抓到的**误报**：像「谁查」「授权起止」「合法性基础」「安全库存线」
+    这类关键词，很多是**列名**而不是行标签 —— 内容写在**被指向的那一列**里。
+    只查「标签在不在 + 其余格有没有内容」会把**填好的稿子判成缺**（实测：机械填满的稿
+    一次冒出 33 项硬错误，其中一半是这个原因）。
+    → 判「列里的内容有没有」，只能**按列下标**取格子。
+    """
+    _ls = sec.split("\n")
+    i = 0
+    while i < len(_ls):
+        s = _ls[i].strip()
+        if not s.startswith("|"):
+            i += 1
+            continue
+        blk = []
+        while i < len(_ls) and _ls[i].strip().startswith("|"):
+            blk.append(_ls[i].strip())
+            i += 1
+        hdr = _cells(blk[0])
+        idx = next((j for j, c in enumerate(hdr) if kw in c), -1)
+        if idx < 0:
+            continue
+        rows = [r for r in blk[1:] if "---" not in r]
+        if sum(1 for r in rows
+               if idx < len(_cells(r)) and not _is_ph(_cells(r)[idx])) >= need:
+            return True
+    return False
+
+
+def _wrote(sec, kw):
+    """这一节里「kw 到底有没有被写出来」—— 三者任一成立即算写了：
+
+      · 出现在**数据格或正文**里（`_data_text`，已排除标题/注释/表头/第一格）；
+      · 作为**行标签**出现且**其余格有内容**（`_row_ok`）；
+      · 作为**字段标签**出现且**标签后有内容**（`_field_ok`）；
+      · 作为**列名**出现且**那一列有值**（`_col_ok`）。
+
+    ⚠️ 为什么不能只用第一个：这些关键词**本身就是骨架预填的行标签**
+    （「安全库存线」「授权起止」「合法性基础」…）—— 它们会被 `_data_text` 排掉，
+    那样**连填好的稿子也会被判缺**。**这正是「查表头」与「查内容」之间的窄缝。**
+    """
+    if kw in _data_text(sec):
+        return True
+    return _row_ok(sec, kw) or _field_ok(sec, kw) or _col_ok(sec, kw)
+
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("用法: python selfcheck.py <plan.md> [--banned banned.json] [--quiet] [--json]")
@@ -264,7 +440,10 @@ def main():
         )
 
     # 1a) 篇幅形状（优化项）：太短基本是空壳（除非明确是「速览版」）
-    _chars = len(re.sub(r"\s", "", body))
+    # ⚠️ 2026-09-19（空转扫描器）：原来数**整篇**非空白字符 —— 骨架的逐节说明与注释
+    #   本身就有三万多字，所以「把内容全删空」照样过门槛。→ 只数**内容层**
+    #   （排除标题、注释、表头；那才是「填进去的东西」）。
+    _chars = len(re.sub(r"\s", "", _data_text(body)))
     if not quiet:
         print(f"  {'✅' if _chars >= 1500 else WARN} 正文非空白字数：{_chars:,}")
     if _chars < 1500 and "速览" not in text and "速览" not in text:
@@ -1038,20 +1217,23 @@ def main():
         else:
             warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
 
-    def _mk(bad):
+
+
+
+    def _mk_soft(bad):
         """按「是否完整版」选控制台标记 —— 与 `_hard_if_full` 的降级保持一致。
 
         ⚠️ 2026-09-19：速览类快案里，判据会被 `_hard_if_full` 降级为**警告**，
         但打印仍用 ❌ → **控制台与最终结论打架**（显示 ❌，结论却是「通过」）。
-        **凡走 `_hard_if_full` 的判据，打印一律用 `_mk(条件)`，不要写 `OK if 条件 else NG`。**
+        **凡走 `_hard_if_full` 的判据，打印一律用 `_mk_soft(条件)`，不要写 `OK if 条件 else NG`。**
         （其余 58 处历史打印点里，有些本来就是硬错误、恒该是 ❌，所以**不做全量替换** ——
           全量替换会把「本来就该红」的关也染成黄色。）
+        ⚠️ 名字必须带后缀：函数体里已经有一个局部变量叫 `_mk`（23b 市场盘子那一段）——
+           同名会**把助手覆盖成字符串**，后文一调用就 `TypeError: 'str' object is not callable`。
+           （现在后面恰好没有调用所以不炸，但那是**地雷**，不是安全。）
         """
         return (NG if _is_full_plan else WARN) if bad else OK
 
-    # 表格小工具（15f／【28】共用）—— 同样必须在所有判据之前定义。
-    def _cells(line):
-        return [c.strip() for c in line.strip().strip("|").split("|")]
 
     def _tbl(sec):
         rows = [r for r in sec.split("\n") if r.strip().startswith("|")]
@@ -1068,61 +1250,13 @@ def main():
     def _cell(row, i):
         return row[i].strip() if 0 <= i < len(row) else ""
 
-    def _zh(s):
-        return len(re.findall(r"[\u4e00-\u9fff]", s))
 
-    def _data_text(sec):
-        """回「**内容层**」文本 —— 判断「有没有写」时应该看这里，而不是看整节。
-
-        ⚠️ 为什么必须有这个助手（2026-09-19 · 六体系取证报告）：报告里有 25 处判据
-        **空骨架也 ✅**，取证结论是「它们查的字符串就印在骨架的表头/标题/注释里」。
-        实测确认了 8 个关键词**只出现在表头或标题或注释**中（`经验参考值`／`平台健康阈值`／
-        `敏感性分析`／`结算方式`／`切点`／`核销成本`／`自下而上`／`钩子类型`）→ 判据**永真**。
-
-        本函数排除三层、只留内容：
-          · **标题行**（`#` 开头）与**注释行**（`>` 开头）—— 那是「要求」，不是「填写」；
-          · **表头行与分隔行** —— 那是「字段名」，不是「内容」；
-          · **每行的第一格** —— 骨架常把行首预填成标签（角色列、阶段名），
-            排除它才不会被「预填标签自证」骗过（与【31】的规则②同一考虑）。
-        """
-        _ls = sec.split("\n")
-        # ⚠️ `_sec_any()` 回的是「**标题文字** ＋ 正文」，而标题**不带 `#`** ——
-        #   所以必须显式砍掉第一行，否则**标题里的词会被当成内容**
-        #   （实测：「5.1 同一母题…各渠道的不同形态」这一行把 `钩子类型` 送进了内容层）。
-        if _ls and not _ls[0].lstrip().startswith(("#", "|", ">")):
-            _ls = _ls[1:]
-        out = []
-        _i = 0
-        while _i < len(_ls):
-            _s = _ls[_i].strip()
-            if _s.startswith("|"):
-                # 表块：**第一行是表头（字段名）、第二行是分隔行** —— 两者都不是内容。
-                # （这一条是初版的第二个漏洞：不跳表头 → 表头里的词照样自证。）
-                _i += 1
-                while _i < len(_ls) and _ls[_i].strip().startswith("|"):
-                    _r = _ls[_i].strip()
-                    if "---" not in _r:
-                        _cs = _cells(_r)
-                        out.extend(_cs[1:] if len(_cs) > 1 else _cs)
-                    _i += 1
-                continue
-            if _s and not _s.startswith(("#", ">", "-", "*")):
-                out.append(_s)
-            _i += 1
-        return " ".join(out)
 
     # 「空/占位」判定（15f 之外、22a 与【31】共用）——
     # ⚠️ 2026-09-19 **第三次**栽在同一处：助手定义晚于调用点 → 22a 一调 `_is_ph` 就
     #    `UnboundLocalError`（脚本 rc=2，而不是判错）。**本仓库已三次（_hard_if_full／_tbl／_is_ph）。**
     #    → 凡是**多个关卡共用**的助手，一律放在这里，不要写进某一关的内部。
-    _PH = re.compile(r"^(?:占位|待补|待定|待确认|TBD|Todo|N/?A)$", re.I)
 
-    def _is_ph(s):
-        s = (s or "").strip()
-        if "【填】" in s:
-            return True
-        _t2 = re.sub(r"[*\s]", "", s)
-        return (not _t2) or bool(_PH.match(_t2))
 
     # 14a 执行摘要
     _abs = next((v for k, v in _secs.items() if "执行摘要" in k or "执行摘要" in k), "")
@@ -1171,8 +1305,15 @@ def main():
     for _title, _txt in _secs.items():
         for _sc, _req in _scene_req.items():
             if any(c in _title for c in _req):
-                _nums = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|万|天|周|个月|个月|次|单|单)", _txt))
-                _tbl = _txt.count("\n|")
+                # ⚠️ 2026-09-19（空转扫描器）：`_txt.count("\n|")` 把**表头与分隔行**也算表格行，
+                #   `_nums` 又会数到章节说明里的数字 → 内容删空也达标。→ 只数**数据行**与**内容层**数字。
+                _nums = len(re.findall(r"\d[\d,.]*\s*(?:元|%|％|万|天|周|个月|次|单)",
+                                       _data_text(_txt)))
+                # 「数据行」＝表块内的行 **减掉表头** 减掉分隔行（只减一次表头，
+                # 骨架每个小节通常只有一张表；多张表时本判据偏宽，但不会把空表算成有数据）。
+                _pipe = [1 for _r8 in _txt.split("\n")
+                         if _r8.strip().startswith("|") and "---" not in _r8]
+                _tbl = max(0, len(_pipe) - 1)
                 _fill = len(re.findall(r"【填】|\{FILL\}", _txt))
                 if _nums < 3 or _tbl < 1 or _fill > 0:
                     _thin_ch.append(f"{_title[:18]}（数字 {_nums}/3、表格行 {_tbl}、残留 【填】 {_fill}）")
@@ -1295,7 +1436,7 @@ def main():
     _ins = [v for k, v in _secs.items() if "洞察萃取" in k]
     if _ins:
         _txt = _ins[0]
-        _ok = ("共鸣测试" in _txt) and bool(re.search(r"(人|用户|用户)", _txt))
+        _ok = _wrote(_txt, "共鸣测试") and bool(re.search(r"人|用户", _data_text(_txt)))
         if not quiet:
             print(f"  {OK if _ok else NG} 洞察萃取：含共鸣测试 {'是' if '共鸣测试' in _txt else '否'}")
         if not _ok:
@@ -1306,7 +1447,10 @@ def main():
     #   而且**连提醒都没有**（没有 else 分支）—— 比判错更危险的一种状态。
     _con = _secs_all("约束与风险底线", "已排除的假设")
     if _con:
-        _n_give = len(re.findall(r"放弃|不做|砍掉|砍哪", "\n".join(_con)))
+        # ⚠️ 2026-09-19（空转扫描器）：原来在**整节文本**上数「放弃」—— 而章节标题与注释里
+        #   就写着「主动放弃」，掏空后仍 ≥2 次 → 判据永真。→ 只数**内容层**。
+        _n_give = len(re.findall(r"放弃|不做|砍掉|砍哪",
+                                 " ".join(_data_text(_c) for _c in _con)))
         _ok = _n_give >= 2
         if not quiet:
             print(f"  {OK if _ok else NG} 主动放弃：出现 {_n_give} 次（需 ≥2）")
@@ -1364,8 +1508,11 @@ def main():
     _ch = [_ch_txt] if _ch_txt else []
     if _ch:
         _txt = _ch[0]
-        _rows = [r for r in _txt.split("\n") if r.strip().startswith("|")][1:]
-        _ok = len(_rows) >= 1 and "不可移植" in _txt
+        # ⚠️ 2026-09-19（空转扫描器）：`[1:]` 只砍掉表头，**分隔行 `|---|` 被当成数据行** →
+        #   掏空后仍有 1 行 → 判据照样 ✅。**分隔行永远不是数据。**
+        _rows = [r for r in _txt.split("\n")
+                 if r.strip().startswith("|") and "---" not in r][1:]
+        _ok = len(_rows) >= 1 and _wrote(_txt, "不可移植")
         if not quiet:
             print(f"  {OK if _ok else NG} 渠道形态表：{len(_rows)} 行、含「不可移植元素」列 "
                   f"{'是' if '不可移植' in _txt else '否'}")
@@ -1575,6 +1722,32 @@ def main():
         _h = _kpi_hdr.group(0)
         _has_freq = bool(re.search(r"频率|频率|每日|每周|每月|多久", _h))
         _has_owner = bool(re.search(r"谁|谁|负责|负责|盯|观测人|观测人", _h))
+        # ⚠️ 2026-09-19（空转扫描器）：原来只查**表头有没有这两列** —— 表头是骨架给的，
+        #   于是「内容删空、只留表头」照样 ✅。**列有了还要有值**：
+        #   该列至少 2 行非占位、非列名，才算真的写了频率与责任人。
+        # ⚠️ 只在**这一张表**的范围内按列算 —— 扫全篇会撞上「别的表在同一个列下标上有值」
+        #   （实测：KPI 判据因此照样 ✅）。`_col_ok` 已经是「按列下标取格子」的通用实现，
+        #   复用它，别再手写一套块提取（手写那版实测在回填稿上误判）。
+        # ⚠️ 不能写 `_sec_any("KPI")`：它命中的是**父章**「六 · KPI 与追踪机制」，
+        #   而 KPI 表在 `### 6.1` 子节里 —— 按 `^#{2,3}` 切节会在父章边界截断，
+        #   取到的父章正文**一张表都没有** → 判据恒判「缺」（实测在三种稿上都误报）。
+        #   → 直接取「**KPI 表头所在的那个表块**」。
+        _ls_kpi = body.split("\n")
+        _blk_kpi, _i_kpi = [], None
+        for _n_kpi, _l_kpi in enumerate(_ls_kpi):
+            if _l_kpi.strip().startswith("|") and "KPI" in _l_kpi:
+                _i_kpi = _n_kpi
+                break
+        if _i_kpi is not None:
+            _k = _i_kpi
+            while _k < len(_ls_kpi) and _ls_kpi[_k].strip().startswith("|"):
+                _blk_kpi.append(_ls_kpi[_k])
+                _k += 1
+        _kpi_sec = ("\n".join(_blk_kpi) if _blk_kpi else body)
+        _has_freq = _has_freq and _col_ok(_kpi_sec or body, "频率", need=2)
+        _has_owner = _has_owner and (_col_ok(_kpi_sec or body, "谁", need=2)
+                                     or _col_ok(_kpi_sec or body, "负责", need=2)
+                                     or _col_ok(_kpi_sec or body, "观测人", need=2))
         if not quiet:
             print(f"  {OK if (_has_freq and _has_owner) else NG} KPI 表：频率列 "
                   f"{'有' if _has_freq else '缺'}、责任人列 {'有' if _has_owner else '缺'}")
@@ -1631,8 +1804,12 @@ def main():
 
     # 17c 舆情：发声人是否唯一且写了时限
     if re.search(r"舆情|舆情|对外发声|对外发声", body):
-        _has_delay = bool(re.search(r"\d+\s*小时|\d+\s*小时|当天|当天", body))
-        _has_spokes = bool(re.search(r"发声人|发声人|对外口径|对外口径|统一口径|统一」?口径", body))
+        # ⚠️ 2026-09-19（空转扫描器）：原来在**全文**里找「几小时」与「发声人」——
+        #   而骨架的注释里就写着「2 小时」「唯一对外发声口」，掏空后照样 ✅。
+        #   → 时限要有数字（内容层），发声人要**作为标签且带内容**。
+        _has_delay = bool(re.search(r"\d+\s*小时|当天", _data_text(body)))
+        _has_spokes = (_wrote(body, "发声人") or _wrote(body, "对外口径")
+                       or _wrote(body, "统一口径"))
         if not quiet:
             print(f"  {OK if (_has_delay and _has_spokes) else NG} 舆情：回应时限 "
                   f"{'有' if _has_delay else '缺'}、发声人／对外口径 {'有' if _has_spokes else '缺'}")
@@ -1699,7 +1876,7 @@ def main():
     # 19a 稽核表：必须写「谁查」「查完报给谁」
     _a19 = _sec19("稽核表")
     if _a19:
-        _miss19 = [c for c in ("谁查", "报给谁") if c not in _a19]
+        _miss19 = [c for c in ("谁查", "报给谁") if not _wrote(_a19, c)]
         if not quiet:
             print(f"  {OK if not _miss19 else NG} 稽核表：{'谁查／报给谁 两列齐' if not _miss19 else '缺 ' + '／'.join(_miss19)}")
         if _miss19:
@@ -1741,8 +1918,8 @@ def main():
         # ⚠️ 判据要能容下**真实写法**：实测「加『广告』标签」这种把标签名加引号隔开的写法，
         #    精确匹配 `广告标签` 会漏 → 误伤一份写明标识的稿子。
         #    → 先认几种明确写法，再退一步认「既有『广告』又有『标签』」。
-        _marked = bool(re.search(r"广告标识|#广告|标明广告|广告字样|标注广告", body)) \
-            or ("广告" in body and "标签" in body)
+        _marked = bool(re.search(r"广告标识|#广告|标明广告|广告字样|标注广告", _data_text(body))) \
+            or ("广告" in _data_text(body) and "标签" in _data_text(body))
         if not _marked:
             if not quiet:
                 print(f"  {NG} 广告可识别性：有达人／素人投放，但全文未见「广告标识」")
@@ -1756,7 +1933,7 @@ def main():
     #     否则就是「漂绿」，现在是被重点查的一类。
     _green = re.findall(r"环保|低碳|可回收|碳中和|零碳|可降解|零添加|绿色包装", body)
     if _green:
-        if not re.search(r"认证|检测报告|证书编号|依据|测算范围|回收率", body):
+        if not re.search(r"认证|检测报告|证书编号|依据|测算范围|回收率", _data_text(body)):
             if not quiet:
                 print(f"  {NG} 绿色宣称举证：出现「{'／'.join(sorted(set(_green)))}」但无认证／测算依据")
             _hard_if_full(f"绿色宣称缺举证：出现「{'／'.join(sorted(set(_green)))}」"
@@ -1780,7 +1957,7 @@ def main():
     # 19e 培训表：必须有「谁培训」与「不合格处置」
     _px = _sec19("培训与物料")
     if _px:
-        _miss19e = [k for k in ("谁培训", "不合格处置") if k not in _px]
+        _miss19e = [k for k in ("谁培训", "不合格处置") if not _wrote(_px, k)]
         if not quiet:
             print(f"  {OK if not _miss19e else NG} 培训表：{'含讲师与不合格处置' if not _miss19e else '缺 ' + '／'.join(_miss19e)}")
         if _miss19e:
@@ -1924,8 +2101,11 @@ def main():
             _m = re.search(_k + r"[^\n|]*\|[^\n|]*\|", _f01[0])
             _r = [r for r in _f01[0].split("\n") if r.strip().startswith("|") and _k in r]
             if _r:
-                _cells = [c.strip() for c in _r[0].split("|")]
-                _v = [c for c in _cells if re.fullmatch(r"[\d.,%％]+", c)]
+                # ⚠️ 原名 `_cells` 与**模块级助手同名** → 让所有嵌套函数里的 `_cells`
+                #   变成「未绑定的自由变量」→ `NameError`。（与 `_mk` 同一类；
+                #   现由 `optimize_scan.py` 的「助手名被局部变量遮蔽」检查兜底。）
+                _cs9 = [c.strip() for c in _r[0].split("|")]
+                _v = [c for c in _cs9 if re.fullmatch(r"[\d.,%％]+", c)]
                 if _v:
                     _nums[_k] = float(_v[-1].replace(",", "").rstrip("%％"))
         if len(_nums) == 4:
@@ -1940,7 +2120,7 @@ def main():
     # 22c 8.2 人力负荷表（执行视角第 6 条）
     _hr = re.findall(r"(?ms)^#{2,3}\s*8\.2[^\n]*\n(.*?)(?=^#{2,3}\s|\Z)", body)
     if _hr:
-        _miss = [k for k in ("是否超载", "补法") if k not in _hr[0]]
+        _miss = [k for k in ("是否超载", "补法") if not _wrote(_hr[0], k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 人力负荷表：{'含超载判定与补法' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -1948,15 +2128,17 @@ def main():
                           f"要逐岗位算负荷（天／月），超载的给出**加人／外包／上工具**三选一与成本。")
     # 22d 预算伸缩（投资人视角第 12 条）
     if re.search(r"执行人力与资源伸缩|删减顺序", body):
-        _miss = [k for k in ("−50%", "+100%") if k not in body]
+        _s22d = _sec_any("执行人力与资源伸缩") or _sec_any("删减顺序") or body
+        _miss = [k for k in ("−50%", "+100%") if not _wrote(_s22d, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 预算伸缩：{'砍半与加倍都写了' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
             _hard_if_full("缺「预算 −50% 先砍哪条／+100% 先加哪条」—— 决策者一定会问这两个问题；"
                           "只给一个固定预算的方案，遇到砍预算就整份作废。")
     # 22e 首单 ROI（投资人视角第 14 条）
-    if "单位经济与回本" in body:
-        if "首单 ROI" not in body:
+    _sue = _sec_any("单位经济与回本")
+    if _sue:
+        if not _wrote(_sue, "首单 ROI"):
             _hard_if_full("单位经济缺「首单 ROI」—— **首单亏是常态**，但要写明亏多少、"
                           "以及最长容忍回本月数，只给生命周期口径不够。")
         elif not quiet:
@@ -1982,10 +2164,9 @@ def main():
     # 22g 加盟商试点（执行视角第 3 条）
     _s22g = _sec_any("对门店") or _sec_any("14.1")
     if _s22g:
-        _dt22g = _data_text(_s22g)
-        _miss = [k for k in ("试点选择标准", "首批家数") if k not in _dt22g]
+        _miss = [k for k in ("试点选择标准", "首批家数") if not _wrote(_s22g, k)]
         if not quiet:
-            print(f"  {_mk(bool(_miss))} 加盟商试点：{'含试点与首批' if not _miss else '缺 ' + '／'.join(_miss)}")
+            print(f"  {_mk_soft(bool(_miss))} 加盟商试点：{'含试点与首批' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
             _hard_if_full("加盟商的账缺「试点选择标准／首批家数」—— 只算账不够，"
                           "要回答「**先让哪 10 家动、给它们什么额外好处、用它们的数据说服剩下的人**」。")
@@ -1997,10 +2178,9 @@ def main():
     # 22h 跨部门接口与冲突升级（执行视角第 7 条）
     _s22h = _sec_any("行动清单")
     if _s22h:
-        _dt22h = _data_text(_s22h)
-        _miss = [k for k in ("依赖方", "冲突升级") if k not in _dt22h]
+        _miss = [k for k in ("依赖方", "冲突升级") if not _wrote(_s22h, k)]
         if not quiet:
-            print(f"  {_mk(bool(_miss))} 跨部门接口：{'含依赖方与升级路径' if not _miss else '缺 ' + '／'.join(_miss)}")
+            print(f"  {_mk_soft(bool(_miss))} 跨部门接口：{'含依赖方与升级路径' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
             _hard_if_full(f"行动清单缺「{'／'.join(_miss)}」—— 每个要别人配合的动作，"
                           f"都要写清「从谁那里拿什么、几号给我、他不给我找谁拍板」。")
@@ -2036,9 +2216,9 @@ def main():
         if not quiet:
             print(f"  {NG} 0.1 问题树：**未找到这一节**（骨架会给，缺了就是被删了）")
     # 23b 市场盘子双算（战略咨询第 4 条 / 投资人第 3 条）
-    _mk = _sec23("市场盘子")
-    if _mk:
-        _miss = [k for k in ("自上而下", "自下而上") if k not in _mk]
+    _s23b = _sec23("市场盘子")
+    if _s23b:
+        _miss = [k for k in ("自上而下", "自下而上") if not _wrote(_s23b, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 市场盘子：{'双算齐' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2064,7 +2244,8 @@ def main():
         if not quiet:
             print(f"  {NG} 战略选项对比：**未找到这一节**（骨架会给，缺了就是被删了）")
     # 23d 增量归因：基线 vs 净增量（战略咨询第 2 条 / 投资人第 7 条）
-    _miss23 = [k for k in ("基线", "净增量") if k not in body]
+    _s23d = _sec_any("盈亏线") or _sec23("增量") or body
+    _miss23 = [k for k in ("基线", "净增量") if not _wrote(_s23d, k)]
     if not quiet:
         print(f"  {OK if not _miss23 else NG} 增量归因：{'含基线与净增量' if not _miss23 else '缺 ' + '／'.join(_miss23)}")
     if _miss23:
@@ -2085,8 +2266,8 @@ def main():
         # ⚠️ 列名只查**表头行**，不能查整节 —— 说明文字里也写着这些词，
         #   查整节会让「列被删了、注释还在」的稿子照样通过（实测踩过）。
         _hdr = next((r for r in _cf.split("\n") if r.strip().startswith("|")), "")
-        _miss = [k for k in ("累计净流",) if k not in _hdr]
-        _miss += [k for k in ("最大资金缺口", "缺口持续") if k not in _cf]
+        _miss = [k for k in ("累计净流",) if not _wrote(_cf, k)]
+        _miss += [k for k in ("最大资金缺口", "缺口持续") if not _wrote(_cf, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 现金流：{'含缺口与持续周数' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2101,7 +2282,7 @@ def main():
     if _pv:
         # 同上：这三个都是**列名**，只查表头行
         _hdr = next((r for r in _pv.split("\n") if r.strip().startswith("|")), "")
-        _miss = [k for k in ("合法性基础", "最小必要", "留存期限") if k not in _hdr]
+        _miss = [k for k in ("合法性基础", "最小必要", "留存期限") if not _wrote(_pv, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 个保法台账：{'五要素齐' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2126,7 +2307,8 @@ def main():
         if not quiet:
             print(f"  {NG} 推进里程碑：**未找到这一节**（骨架会给，缺了就是被删了）")
     # 24d 交付物签批（合规视角第 15 条）—— 基线第 10 条卡在 4.5/5 的直接原因
-    _miss24d = [k for k in ("版本", "编制", "审核", "变更记录") if k not in body]
+    _s24d = _sec24("交付") or _sec_any("封面") or body
+    _miss24d = [k for k in ("版本", "编制", "审核", "变更记录") if not _wrote(_s24d, k)]
     if not quiet:
         print(f"  {OK if not _miss24d else NG} 交付物签批：{'版本·编制·审核·变更记录齐' if not _miss24d else '缺 ' + '／'.join(_miss24d)}")
     if _miss24d:
@@ -2148,7 +2330,7 @@ def main():
     # 25a 概念测试三要素（4A 工序第 6 条）
     _ct = _sec25("概念测试")
     if _ct:
-        _miss = [k for k in ("测试对象", "问什么", "合格线") if k not in _hdr_of(_ct)]
+        _miss = [k for k in ("测试对象", "问什么", "合格线") if not _wrote(_ct, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 概念测试：{'三要素齐' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2161,8 +2343,8 @@ def main():
     # 25b 媒介组合与预算分配（4A 工序第 8 条）
     _md = _sec25("媒介组合与预算分配")
     if _md:
-        _miss = [k for k in ("预算占比", "预期触达", "频次") if k not in _hdr_of(_md)]
-        if "三段排期" not in _md:
+        _miss = [k for k in ("预算占比", "预期触达", "频次") if not _wrote(_md, k)]
+        if not _wrote(_md, "三段排期"):
             _miss.append("三段排期")
         if not quiet:
             print(f"  {OK if not _miss else NG} 媒介策划：{'占比/触达/频次/三段排期齐' if not _miss else '缺 ' + '／'.join(_miss)}")
@@ -2184,7 +2366,7 @@ def main():
     # 25c 备货与库存（执行视角第 5 条）
     _st = _sec25("备货与库存")
     if _st:
-        _miss = [k for k in ("安全库存线", "临期") if k not in _hdr_of(_st) and k not in _st]
+        _miss = [k for k in ("安全库存线", "临期") if not _wrote(_st, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 备货与库存：{'含安全线与临期处理' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2196,7 +2378,7 @@ def main():
     # 25d 素材资产台账（4A 工序第 11 条）
     _da = _sec25("素材资产台账")
     if _da:
-        _miss = [k for k in ("授权起止", "到期替换动作") if k not in _hdr_of(_da)]
+        _miss = [k for k in ("授权起止", "到期替换动作") if not _wrote(_da, k)]
         if not quiet:
             print(f"  {OK if not _miss else NG} 素材台账：{'含授权起止与到期动作' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
@@ -2231,10 +2413,10 @@ def main():
     # 26b 达人塌房：切割与追偿（8.9.1）
     _cr = _sec25("达人塌房")
     if _cr:
-        _miss = [k for k in ("时限", "留什么证") if k not in _hdr_of(_cr)]
-        if "定性" not in _cr:
+        _miss = [k for k in ("时限", "留什么证") if not _wrote(_cr, k)]
+        if not _wrote(_cr, "定性"):
             _miss.append("定性阶段")
-        if "追偿" not in _cr:
+        if not _wrote(_cr, "追偿"):
             _miss.append("追偿")
         if not quiet:
             print(f"  {OK if not _miss else NG} 达人塌房："
@@ -2250,8 +2432,8 @@ def main():
     # 26c 评论区与私信值守（8.3.5）
     _cm = _sec25("评论区与私信值守")
     if _cm:
-        _miss = [k for k in ("值守人", "首响时限") if k not in _hdr_of(_cm)]
-        if not any(k in _cm for k in ("必须删", "举报")):
+        _miss = [k for k in ("值守人", "首响时限") if not _wrote(_cm, k)]
+        if not (_wrote(_cm, "必须删") or _wrote(_cm, "举报")):
             _miss.append("必须删／举报清单")
         if not quiet:
             print(f"  {OK if not _miss else NG} 评论区值守："
@@ -2780,6 +2962,11 @@ if __name__ == "__main__":
         sys.exit(130)
     except Exception as e:
         print(f"\n{NG} 脚本执行出错：{type(e).__name__}: {e}")
+        # ⚠️ 2026-09-19 补：原来只印消息**不印行号** —— 定位要翻源码。
+        #   而本仓库这类错（助手定义晚于调用点 → UnboundLocalError）**只有行号能一眼看出**。
+        _tb = traceback.extract_tb(sys.exc_info()[2])
+        for _f in _tb[-3:]:
+            print(f"   在 {os.path.basename(_f.filename)}:{_f.lineno}  {(_f.line or '')[:90]}")
         print("→ 依协议 8（卡死处理）：")
         print("   1) 依上面讯息修正后重跑；")
         print("   2) 若属环境问题（文件读不到／编码异常），改用 Markdown 协议手工比对 §六 清单，不要卡在这里；")

@@ -18,6 +18,7 @@
     python scripts/optimize_scan.py -n 20 --all     # 看全部命中（不限 10 条）
     python scripts/optimize_scan.py --report 扫描.md
 """
+import ast
 import argparse
 import glob
 import io
@@ -86,6 +87,33 @@ def d2_doc_drift():
             f"写的 {m.group(1)}，实际 {n_scripts}",
             "读者按这个数字判断工具面有多大；对不上＝文档没跟上代码",
             f"改成 {n_scripts}（并把 CLI 数写成 {n_cli}）", 2)
+    # ── D4 助手名被局部变量遮蔽（2026-09-19 加）──────────────────────────────
+    # 症状：`scripts/*.py` 里把**模块级助手名**又当成普通变量名用了一次（如 `_cells = [...]`），
+    #   于是同一个函数里所有嵌套 def 引用它时变成「未绑定的自由变量」→
+    #   `NameError: cannot access free variable ... in enclosing scope`。
+    #   ⚠️ 本仓库为此栽过**两次**（`_mk`、`_cells`），而且都发生在「刚把助手提到模块级」之后。
+    #   它不会在静态检查里报错（ast 合法），只在**运行到那一段**时炸。
+    _HELPER_HINT = re.compile(r"^(_[a-z][a-z0-9_]*)$")
+    for _f in py_files():
+        try:
+            _tree = ast.parse(read(_f))
+        except Exception as _e:
+            print(f"  {WARN} 助手名遮蔽检查跳过（解析不了）：{os.path.basename(_f)}"
+                  f"（{type(_e).__name__}）")
+            continue
+        _mod_funcs = {n.name for n in _tree.body if isinstance(n, ast.FunctionDef)}
+        if not _mod_funcs:
+            continue
+        for _node in ast.walk(_tree):
+            if not isinstance(_node, ast.FunctionDef):
+                continue
+            _locals = {t2.id for _s in ast.walk(_node) for t2 in ast.walk(_s)
+                       if isinstance(t2, ast.Name) and isinstance(t2.ctx, ast.Store)}
+            _clash = sorted(_locals & _mod_funcs)
+            if _clash:
+                add("助手名遮蔽", f"{os.path.basename(_f)}:{_node.lineno}（函数 {_node.name}）",
+                    f"局部变量用了模块级助手名：{'、'.join(_clash)} —— 会让嵌套 def 里的同名引用"
+                    f"变成未绑定自由变量（NameError）", "改局部变量名（加后缀），不要改助手名", 3)
     m = re.search(r"A 接口（(\d+) 支 CLI 脚本", skill)
     if m and int(m.group(1)) != n_cli:
         add("文档漂移", "SKILL.md（verify_all 行『A 接口（N 支 CLI 脚本）』）",

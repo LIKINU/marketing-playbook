@@ -1038,6 +1038,17 @@ def main():
         else:
             warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
 
+    def _mk(bad):
+        """按「是否完整版」选控制台标记 —— 与 `_hard_if_full` 的降级保持一致。
+
+        ⚠️ 2026-09-19：速览类快案里，判据会被 `_hard_if_full` 降级为**警告**，
+        但打印仍用 ❌ → **控制台与最终结论打架**（显示 ❌，结论却是「通过」）。
+        **凡走 `_hard_if_full` 的判据，打印一律用 `_mk(条件)`，不要写 `OK if 条件 else NG`。**
+        （其余 58 处历史打印点里，有些本来就是硬错误、恒该是 ❌，所以**不做全量替换** ——
+          全量替换会把「本来就该红」的关也染成黄色。）
+        """
+        return (NG if _is_full_plan else WARN) if bad else OK
+
     # 表格小工具（15f／【28】共用）—— 同样必须在所有判据之前定义。
     def _cells(line):
         return [c.strip() for c in line.strip().strip("|").split("|")]
@@ -1059,6 +1070,46 @@ def main():
 
     def _zh(s):
         return len(re.findall(r"[\u4e00-\u9fff]", s))
+
+    def _data_text(sec):
+        """回「**内容层**」文本 —— 判断「有没有写」时应该看这里，而不是看整节。
+
+        ⚠️ 为什么必须有这个助手（2026-09-19 · 六体系取证报告）：报告里有 25 处判据
+        **空骨架也 ✅**，取证结论是「它们查的字符串就印在骨架的表头/标题/注释里」。
+        实测确认了 8 个关键词**只出现在表头或标题或注释**中（`经验参考值`／`平台健康阈值`／
+        `敏感性分析`／`结算方式`／`切点`／`核销成本`／`自下而上`／`钩子类型`）→ 判据**永真**。
+
+        本函数排除三层、只留内容：
+          · **标题行**（`#` 开头）与**注释行**（`>` 开头）—— 那是「要求」，不是「填写」；
+          · **表头行与分隔行** —— 那是「字段名」，不是「内容」；
+          · **每行的第一格** —— 骨架常把行首预填成标签（角色列、阶段名），
+            排除它才不会被「预填标签自证」骗过（与【31】的规则②同一考虑）。
+        """
+        _ls = sec.split("\n")
+        # ⚠️ `_sec_any()` 回的是「**标题文字** ＋ 正文」，而标题**不带 `#`** ——
+        #   所以必须显式砍掉第一行，否则**标题里的词会被当成内容**
+        #   （实测：「5.1 同一母题…各渠道的不同形态」这一行把 `钩子类型` 送进了内容层）。
+        if _ls and not _ls[0].lstrip().startswith(("#", "|", ">")):
+            _ls = _ls[1:]
+        out = []
+        _i = 0
+        while _i < len(_ls):
+            _s = _ls[_i].strip()
+            if _s.startswith("|"):
+                # 表块：**第一行是表头（字段名）、第二行是分隔行** —— 两者都不是内容。
+                # （这一条是初版的第二个漏洞：不跳表头 → 表头里的词照样自证。）
+                _i += 1
+                while _i < len(_ls) and _ls[_i].strip().startswith("|"):
+                    _r = _ls[_i].strip()
+                    if "---" not in _r:
+                        _cs = _cells(_r)
+                        out.extend(_cs[1:] if len(_cs) > 1 else _cs)
+                    _i += 1
+                continue
+            if _s and not _s.startswith(("#", ">", "-", "*")):
+                out.append(_s)
+            _i += 1
+        return " ".join(out)
 
     # 「空/占位」判定（15f 之外、22a 与【31】共用）——
     # ⚠️ 2026-09-19 **第三次**栽在同一处：助手定义晚于调用点 → 22a 一调 `_is_ph` 就
@@ -1673,9 +1724,9 @@ def main():
     _c19 = _sec19("本地生活", "到店链路")
     if _c19:
         if not quiet:
-            print(f"  {OK if '核销成本' in _c19 else NG} 本地生活到店链路："
-                  f"核销成本 {'已测算' if '核销成本' in _c19 else '缺'}")
-        if "核销成本" not in _c19:
+            print(f"  {OK if re.search(r'核销成本', _data_text(_c19)) else NG} 本地生活到店链路："
+                  f"核销成本 {'已测算' if re.search(r'核销成本', _data_text(_c19)) else '缺'}")
+        if not re.search(r"核销成本", _data_text(_c19)):
             _hard_if_full("本地生活到店链路**没算核销成本**（套餐让利＋平台佣金＋履约成本）——"
                           "不算这笔，团购就是卖得越多亏得越多。")
 
@@ -1760,45 +1811,66 @@ def main():
         if "钩子类型" not in body:
             _hard_if_full("渠道表缺「钩子类型」列 —— 五种钩子（结果前置／冲突提问／反常识／"
                           "利益直给／身份喊话）必须选一类来写，写「突出产品卖点」＝没选。")
-        elif not re.search(r"结果前置|冲突提问|反常识|利益直给|身份喊话", body):
+        elif not re.search(r"结果前置|冲突提问|反常识|利益直给|身份喊话",
+                            _data_text(_sec_any("同一母题") or "")):
             _hard_if_full("「钩子类型」列填的不是五类之一 —— 必须从枚举里选。")
         elif not quiet:
             print(f"  {OK} 短视频钩子：含钩子类型列且用了枚举值")
+    else:
+        # ⚠️ 2026-09-19（六体系取证报告 · 体系4）：原来**没有 else** →
+        #   **删掉整节，这一关就静默消失**（不是判错，是根本不存在了）。
+        #   骨架一定会给这一节，所以「找不到」＝被删了，必须报。
+        if not quiet:
+            print(f"  {NG if _is_full_plan else WARN} 短视频钩子：**未找到「5.1 同一母题」表**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「5.1 同一母题 · 各渠道的不同形态」—— 渠道原生与五个钩子类型都挂在这张表上。")
     # 21b 平台健康阈值参考（平台视角第 2 条）
+    _s21b = _sec_any("平台健康阈值")
     if re.search(r"抖音|小红书|视频号", body):
-        if "经验参考值" not in body and "平台健康阈值" not in body:
+        if not _s21b or not re.search(r"\d", _data_text(_s21b)):
             _hard_if_full("缺「平台健康阈值参考」—— 每个平台该看哪个数、低于多少要动手，"
                           "必须给经验值（写「经验值」而不是承诺，否则变成效果保证）。")
         elif not quiet:
             print(f"  {OK} 平台健康阈值：已给经验参考值")
     # 21c 达人结算方式与效果绑定（平台视角第 5 条）
     if re.search(r"达人|KOL|素人", body):
-        if not re.search(r"结算方式|纯佣|坑位费|保量", body):
+        if not re.search(r"结算方式|纯佣|坑位费|保量",
+                          _data_text(_sec_any("外部合作") or "")):
             _hard_if_full("达人合同要点缺「结算方式与效果绑定」—— 纯佣／坑位费／保量＋未达标扣减"
                           "不写清，付了钱没交付说不明白。")
         elif not quiet:
             print(f"  {OK} 达人结算：已写结算方式与效果绑定")
     # 21d 素材切片切点（平台视角第 12 条）
     if "母素材复用" in body or "复用去向" in body:
-        if "切点" not in body:
+        if not re.search(r"切点", _data_text(_sec_any("内容产能") or "")):
             _hard_if_full("内容产能表缺「切片切点」—— 只说「切 3 条」不说「从哪切」，"
                           "执行的人只能从头到尾硬切。要写到具体内容点（如「00:12 翻车瞬间」）。")
         elif not quiet:
             print(f"  {OK} 素材切点：已写具体切点")
+    else:
+        if not quiet:
+            print(f"  {NG if _is_full_plan else WARN} 素材切点：**未找到「内容产能与复用」表**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「10.2 内容产能与复用」—— 没有它，素材迭代只能从头硬切，人效算不出来。")
     # 21e 企微/个微选择判据（平台视角第 6 条）
     if re.search(r"加微|私域|承接载体", body):
-        if "载体怎么选" not in body and "客户资产归属" not in body:
+        _s21e = _sec_any("加微") or _sec_any("私域") or ""
+        if not re.search(r"载体怎么选|客户资产归属|群发能力|封号风险",
+                         _data_text(_s21e)):
             _hard_if_full("私域承接载体缺选择判据 —— 「选一并说明理由」等于自己拍脑袋；"
                           "要给四条判据：客户资产归属／群发能力／封号风险／离职迁移成本。")
         elif not quiet:
             print(f"  {OK} 承接载体：已给四条判据")
     # 21f 敏感性必须压「最长板」—— 复购/留存（投资人视角第 11 条）
-    if "敏感性分析" in body:
-        if not re.search(r"复购次数|留存年限|留存率|复购率", body):
+    _s21f = _sec_any("敏感性")
+    if _s21f:
+        if not re.search(r"复购|留存", _data_text(_s21f)):
             _hard_if_full("敏感性分析只压客单/转化/投放 —— **留存与复购是最脆的**，"
                           "悲观档必须至少压其中一个，否则等于没做压力测试。")
         elif not quiet:
             print(f"  {OK} 敏感性参数：含复购/留存")
+    else:
+        if not quiet:
+            print(f"  {NG if _is_full_plan else WARN} 敏感性参数：**未找到「7.3 敏感性分析」**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「7.3 敏感性分析」—— 单点盈亏线是假精确，关键结论必须给乐观／基准／悲观三档。")
 
     # 22) A 批第四批：投资人 5 条 + 执行 3 条（2026-09-19）
     #
@@ -1908,18 +1980,27 @@ def main():
         _hard_if_full("缺「14.2 分渠道单位经济」—— 知识库明说「一定要分渠道算 LTV，"
                       "不同渠道用户质量差异巨大」，只给合计值会把高质渠道的钱补贴给低质渠道。")
     # 22g 加盟商试点（执行视角第 3 条）
-    if "14.1 对门店" in body or "对门店／加盟商的账" in body:
-        _miss = [k for k in ("试点选择标准", "首批家数") if k not in body]
+    _s22g = _sec_any("对门店") or _sec_any("14.1")
+    if _s22g:
+        _dt22g = _data_text(_s22g)
+        _miss = [k for k in ("试点选择标准", "首批家数") if k not in _dt22g]
         if not quiet:
-            print(f"  {OK if not _miss else NG} 加盟商试点：{'含试点与首批' if not _miss else '缺 ' + '／'.join(_miss)}")
+            print(f"  {_mk(bool(_miss))} 加盟商试点：{'含试点与首批' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
             _hard_if_full("加盟商的账缺「试点选择标准／首批家数」—— 只算账不够，"
                           "要回答「**先让哪 10 家动、给它们什么额外好处、用它们的数据说服剩下的人**」。")
-    # 22h 跨部门接口与冲突升级（执行视角第 7 条）
-    if "行动清单" in body:
-        _miss = [k for k in ("依赖方", "冲突升级") if k not in body]
+    else:
         if not quiet:
-            print(f"  {OK if not _miss else NG} 跨部门接口：{'含依赖方与升级路径' if not _miss else '缺 ' + '／'.join(_miss)}")
+            print(f"  {NG if _is_full_plan else WARN} 加盟商试点：**未找到 14.1 对门店／加盟商的账**（骨架会给，缺了就是被删了）")
+        _hard_if_full("缺「14.1 对门店／加盟商的账」——**他不配合是因为你没算给他看**；"
+                      "没有这一节，总部算得再漂亮，门店也不会动。")
+    # 22h 跨部门接口与冲突升级（执行视角第 7 条）
+    _s22h = _sec_any("行动清单")
+    if _s22h:
+        _dt22h = _data_text(_s22h)
+        _miss = [k for k in ("依赖方", "冲突升级") if k not in _dt22h]
+        if not quiet:
+            print(f"  {_mk(bool(_miss))} 跨部门接口：{'含依赖方与升级路径' if not _miss else '缺 ' + '／'.join(_miss)}")
         if _miss:
             _hard_if_full(f"行动清单缺「{'／'.join(_miss)}」—— 每个要别人配合的动作，"
                           f"都要写清「从谁那里拿什么、几号给我、他不给我找谁拍板」。")
@@ -2553,7 +2634,15 @@ def main():
             continue
         for _r in _data:
             _c = list(_cells(_r))
-            if _c and all(_is_ph(x) for x in _c):
+            # ⚠️⚠️ 2026-09-19 第二轮（六体系取证报告点名的 25 处「空转」）：
+            #   初版规则是「**整行**皆空/占位才算空行」—— **逃逸口就在这里**：
+            #   骨架常把「第一格」预填好（直播排品的角色列写着「引流款／利润款／福利款」、
+            #   2.4 排期的行首写着「预热／引爆」），其余格全是 `【填】` →
+            #   整行不是「皆空」→ **【31】放行**，而那 25 处判据恰好都查这些预填字符串。
+            #   → 规则改成：**除第一格外全空/占位＝空行**（只有一格时，单格算）。
+            #   这一处改动**一次封住 25 处的共同逃逸口**，比逐关改 25 个判据便宜且可靠。
+            _tail = _c[1:] if len(_c) > 1 else _c
+            if _tail and all(_is_ph(x) for x in _tail):
                 _hollow_row.append(_name)
                 break
 

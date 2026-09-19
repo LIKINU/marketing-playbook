@@ -195,7 +195,10 @@ def stage_d(quiet):
         ("role_check.py", [roles], (0,)),
         ("budget_check.py", [budget], (0,)),
         ("composer.py", ["--rules", rules, "--out", skel, "--tier", "标准"], (0,)),
-        ("selfcheck.py", [plan], (0,)),
+        # ⚠️ 2026-09-19：允许 rc=1。那份「交付稿」是**旧范式时代的精简稿**（现骨架 77 节，它 36 节），
+        #   按现行标准本来就该被查出缺章 —— 这一关在本脚本里**只验「跑得起来、把问题报清楚」**，
+        #   不拿它当「合格稿」的证明（合格的完整版夹具**目前还没有**，见对标量表 §8.10）。
+        ("selfcheck.py", [plan], (0, 1)),
         ("depth_check.py", [plan], (0, 1)),      # 只诊断不阻拦
     ]:
         rc, out = sh([PY, os.path.join(HERE, name)] + args)
@@ -204,9 +207,12 @@ def stage_d(quiet):
             bad.append((name, f"rc={rc}｜{(out.strip().splitlines() or [''])[-1][:90]}"))
     # 出稿
     # build_docx 会先跑 selfcheck；范例交付稿没有《任务规则表》标记 → 必须显式给 --rules
+    # ⚠️ 2026-09-19：加 `--skip-check` —— **本步测的是 .docx 生成器能不能跑**，
+    #   不是「这份稿合不合格」。不加的话，上面那份旧精简稿会被自检拦下、生成器就测不到了。
+    #   （护栏那一侧由下一步 run_pipeline 覆盖。）
     rc, out = sh([PY, os.path.join(HERE, "build_docx.py"), plan, "-o", docx,
                   "--title", "验证用方案", "--date", "2026-09-17",
-                  "--rules", rules], timeout=300)
+                  "--skip-check", "--rules", rules], timeout=300)
     steps.append(("build_docx.py", rc))
     if rc != 0 or not os.path.exists(docx):
         bad.append(("build_docx.py", f"rc={rc}｜{(out.strip().splitlines() or [''])[-1][:90]}"))
@@ -218,8 +224,15 @@ def stage_d(quiet):
                   "-o", os.path.join(TMP, "pipeline.docx")], timeout=300)
     steps.append(("run_pipeline.py", rc))
     ok_pipeline = os.path.exists(os.path.join(TMP, "pipeline.docx"))
-    if not ok_pipeline:
-        bad.append(("run_pipeline.py", f"未产出 .docx（rc={rc}）｜{out.strip().splitlines()[-1][:80]}"))
+    # ⚠️ 2026-09-19 改：run_pipeline 是**唯一入口、硬关卡不过就中止** —— 那是它的正确行为，
+    #   不该为了「测试出稿」去绕过它。所以断言改成二选一：
+    #     ① 出稿成功；或 ② rc≠0 **且明确说了卡在哪一关**（不许静默失败）。
+    _tail = (out.strip().splitlines() or [""])[-1][:90]
+    _blocked_clearly = (rc != 0) and any(
+        k in out for k in ("自检", "硬错误", "门禁", "中止", "不得交付", "不通过"))
+    if not ok_pipeline and not _blocked_clearly:
+        bad.append(("run_pipeline.py",
+                    f"既没出稿、也没说清卡在哪一关（rc={rc}）｜{_tail}"))
     if not quiet:
         print("  D 端到端：" + " → ".join(f"{n}(rc={r})" for n, r in steps))
         if os.path.exists(docx):

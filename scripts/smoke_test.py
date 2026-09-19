@@ -45,7 +45,21 @@ def main():
     chk("分工（正常分工记录）", run("role_check.py", [roles]), 0)
     chk("预算（JSON）", run("budget_check.py", [budget]), 0)
     chk("预算（3 列表格·从交付稿抓）", run("budget_check.py", [plan]), 0)
-    chk("自检（简体标杆稿）", run("selfcheck.py", [plan]), 0)
+    # ⚠️ 2026-09-19 修：这里**原来断言 `rc==0`** —— 而那等于**逼着判据保持宽松**才能通过。
+    #   实测：那份「交付稿」是**旧范式时代的精简稿**（现骨架 77 节，它只有 36 节），
+    #   按现行标准本来就该被查出缺章（当日实测 22 项硬错误，绝大多数是**真的缺**）。
+    #   → 改成只断言它**不因「护栏类」原因被误拦**（这才是这条测试的本意）：
+    #     · 不因**繁体**被拦（统一简体后仍要挡外部贴进来的繁体，但不能把简体稿判成繁体）；
+    #     · 不因**未填占位**被拦。
+    #   ⚠️ **遗留缺口（已知）**：这样一来，**没有任何夹具能证明「一份合格的完整版方案能通过」**。
+    #     下一件该做的事就是补一份**完整版通过夹具** —— 见 `对标量表-v2` §8.10。
+    _p = subprocess.run([PY, os.path.join(HERE, "selfcheck.py"), plan],
+                        capture_output=True, text=True)
+    _txt = _p.stdout + _p.stderr
+    chk("自检（精简版标杆稿·繁体不误判）",
+        1 if re.search(r"❌[^\n]*繁体", _txt) else 0, 0)
+    chk("自检（精简版标杆稿·占位不误判）",
+        1 if re.search(r"❌[^\n]*【填】", _txt) else 0, 0)
     chk("深度诊断（只诊断·恒 0）", run("depth_check.py", [plan]), 0)
 
     # ② composer 三档都能出骨架

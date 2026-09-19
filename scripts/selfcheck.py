@@ -1466,7 +1466,7 @@ def main():
             print(f"  {OK if not _bad else NG} 核心概念样稿：{len(_drafts)} 张"
                   + (f"｜{'；'.join(_bad[:3])}" if _bad else "｜均为真文本 ✅"))
         for _b in _bad[:3]:
-            _hard_if_full(f"核心概念样稿不达标：{_b} —— 真样稿＝**能通读的文案全文**（≥80 实字），"
+            _hard_if_full(f"核心概念样稿不达标：{_b} —— 真样稿＝**能通读的文案全文**（≥30 实字），"
                           f"不是「视觉风格：年轻有活力」这类描述。")
 
     if not quiet:

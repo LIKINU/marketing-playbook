@@ -419,6 +419,11 @@ def l7(quiet):
 L8_STORE = re.compile(r"单店投入[^\n]{0,12}回本[^\n]{0,12}?(\d+)\s*个月")
 L8_AD = re.compile(r"品牌投放[^\n]{0,12}回本[^\n]{0,12}?(\d+)\s*个月")
 L8_LTV = re.compile(r"生命周期价值\s*LTV\s*[（(][^）)\n]*×[^）)\n]*[）)]")
+# 「真样稿 ≥N 实字」——权威值是 30（海报天然 20–40 字；80 会误杀、50 仍偏严）。
+# ⚠️ 2026-09-19：量表里写着「≥80」而代码是 30，正是「同一概念两个数」；
+#   这条锚定让两边再也走不散。
+L8_DRAFT = re.compile(r"样稿[^。\n]{0,24}≥\s*(\d+)\s*实字")
+L8_DRAFT_ALLOW = 30
 
 
 def l8(quiet):
@@ -459,6 +464,10 @@ def l8(quiet):
                 if "留存年限" not in m.group(0):
                     bad.append((rel, i, "LTV 公式缺「留存年限」（四因子才算同一口径）",
                                 m.group(0)[:76]))
+            for m in L8_DRAFT.finditer(ln):
+                if int(m.group(1)) != L8_DRAFT_ALLOW:
+                    bad.append((rel, i, f"样稿字数阈值={m.group(1)}（权威值 {L8_DRAFT_ALLOW}；"
+                                        f"海报天然 20–40 字，写大＝误杀合格样稿）", m.group(0)[:76]))
     if not quiet:
         print(f"  L8 口径一致（回本阈值／LTV 公式）：**{len(bad)} 处冲突**")
         for f, i, why, l in bad[:10]:

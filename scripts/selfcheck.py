@@ -831,8 +831,15 @@ def main():
     #     · 整块**一个「怎么做」都没有** → 判定为「旧版骨架产的稿」→ 报一条总括；
     #     · 有该栏但**部分没填/过短** → 逐条报，指出差几步。
     _STEP = re.compile(r"(?m)^\s*\d+[.、]")
-    _HOW = re.compile(r"(?m)^\s*-\s*\*\*怎么做\*\*[：:]\s*(.*)$")
-    _legacy, _unfilled = [], []
+    _HOW = re.compile(r"(?m)^\s*-\s*\*\*怎么做\*\*[：:](.*)$")
+    # 「怎么做」必须覆盖的**四件事**的信号词（缺 3 件以上＝只写了口号）：
+    #   ① 方法（怎么做）② 工具／模板／物料 ③ 谁做／在什么条件 ④ 判据／数字（做到什么算完成）
+    _MIN_HOW = 40      # 「怎么做」的实字门槛（见下注释：12 → 40 的原因）
+    _HOW4 = (r"用|先|把|按|做|拆|列|排|测|跑|拍|写|画|建|约|谈|发|投|算|对|核",      # ① 方法
+             r"工具|模板|表格|表单|清单|话术|脚本|brief|SOP|系统|软件|App|小程序|Excel",  # ② 工具／物料
+             r"谁|岗|人|团队|部门|老板|店长|客户|顾问|由.{0,4}(做|负责)|分工",                 # ③ 谁执行
+             r"\d|判据|标准|合格线|阈值|不低|达到|超过|≥|≤|以内|以上|为准|数")                                   # ④ 判据／数字
+    _legacy, _unfilled, _thin4 = [], [], []
     for _pi, _b in enumerate(p_blocks, 1):
         _ns = len(_STEP.findall(_b))
         _how = _HOW.findall(_b)
@@ -841,9 +848,19 @@ def main():
         if not _how:
             _legacy.append(f"打法{_pi}")
             continue
-        _ok_n = sum(1 for _h in _how if _zh(_h) >= 12)
+        # ⚠️ 门槛从 12 → **40 实字**（2026-09-20，用户反馈「还是太短了，不够具体，
+        #   内容太少了，要在代码级改」）。依据：一句话约 20–30 字；**40 字以上**才可能
+        #   同时说清「方法 ＋ 工具 ＋ 谁做 ＋ 判据」 —— 12 字等于放行「喊口号」。
+        #   另查**四件事是否齐**（缺 → 记进 _n_weak，走同一条硬关，但报法更具体）。
+        _ok_n = sum(1 for _h in _how if _zh(_h) >= _MIN_HOW)
+        # ⚠️ 变量名不能叫 `_weak` —— 7d（可抄案例）与本段都用过 `_weak`，
+        #   本次实测撞名（靠执行顺序侥幸没出事）。**同一函数里不要复用这种通用名**。
+        _weak4 = [j for j, _h in enumerate(_how, 1) if _zh(_h) >= _MIN_HOW
+                  and sum(bool(re.search(_p, _h)) for _p in _HOW4) < 3]
         if _ok_n < _ns:
-            _unfilled.append(f"打法{_pi}（{_ok_n}/{_ns} 步）")
+            _unfilled.append(f"打法{_pi}（{_ok_n}/{_ns} 步达标）")
+        if _weak4:
+            _thin4.append(f"打法{_pi} 第{_weak4}步")
     if _legacy and not quiet:
         print(f"  {NG} 有 {len(_legacy)} 条打法的步骤里**没有「怎么做」这一栏**"
               f"（{'、'.join(_legacy[:4])}{'…' if len(_legacy) > 4 else ''}）")
@@ -852,13 +869,22 @@ def main():
             f"{len(_legacy)} 条打法的实操**缺「怎么做」栏** —— 用的是旧版骨架。"
             "「做什么」不等于「怎么做到」：每一步都要写到**换个人照着也能做**"
             "（方法／工具／判据），否则就是空泛。请用新版 `composer.py` 重新出骨架后再填。")
+    if _thin4 and not quiet:
+        print(f"  {NG} 有 {len(_thin4)} 处「怎么做」**要素不齐**（四件事缺 ≥2）："
+              f"{'、'.join(_thin4[:4])}{'…' if len(_thin4) > 4 else ''}")
+    if _thin4:
+        _hard_if_full(
+            f"这些步骤的「怎么做」**只说了一半**：{'、'.join(_thin4[:6])} —— "
+            "「怎么做」要写满四件事：① 用什么方法　② 用什么工具／模板／物料　"
+            "③ 谁在什么条件下执行　④ 做到什么算完成（带数字或判据）。缺两件以上＝还是空泛。")
     if _unfilled:
         if not quiet:
-            print(f"  {NG} 有 {len(_unfilled)} 条打法**部分步骤的「怎么做」没写或过短**："
-                  f"{'、'.join(_unfilled[:4])}{'…' if len(_unfilled) > 4 else ''}")
+            print(f"  {NG} 有 {len(_unfilled)} 条打法**部分步骤的「怎么做」没写或过短**"
+                  f"（门槛 40 实字）：{'、'.join(_unfilled[:4])}{'…' if len(_unfilled) > 4 else ''}")
         _hard_if_full(
             f"这些打法的部分步骤没写「怎么做」：{'、'.join(_unfilled[:6])} —— "
-            "每条打法的**每一步**都要有「怎么做」，且写到可执行（含方法／工具／判据，≥12 实字）；"
+            f"每条打法的**每一步**都要有「怎么做」，且**≥{_MIN_HOW} 实字**（门槛从 12 提到 {_MIN_HOW}："
+            "12 字放行的就是「喊口号」），四件事齐：方法／工具·物料／谁执行／判据·数字。"
             "只写「做什么」是空泛，不是方案。")
 
     # 8) 知识展开度（2026-09-17 **反转**）

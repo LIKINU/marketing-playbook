@@ -215,7 +215,14 @@ def engine():
     return (lambda s: "".join(m.get(c, c) for c in s)), f"t2s_data（内置表，字级；{_why}）"
 
 
+# `--only` 限定范围（**供生成器复用本脚本的词表**，不另抄一份）：
+#   例：`lang_unify.py --fix --only references/14-商业模式模式库.md`
+ONLY = []
+
+
 def targets():
+    if ONLY:
+        return [os.path.relpath(x, ROOT) if os.path.isabs(x) else x for x in ONLY]
     out = []
     for dp, dn, fn in os.walk(ROOT):
         dn[:] = [d for d in dn if d not in SKIP_DIRS]
@@ -296,9 +303,13 @@ def main():
     ap.add_argument("--strict", action="store_true", help="还有残留就 exit 1")
     ap.add_argument("--json", action="store_true",
                     help="机器可读摘要（给 verify_all 用 —— 解析输出文案太脆，文案一改就断）")
+    ap.add_argument("--only", action="append", default=[], metavar="相對路徑",
+                    help="只处理指定档（可重复）—— 给生成器/单档维护用")
     ap.add_argument("--no-vocab", action="store_true",
                     help="只做字体层，不动词汇层（词汇表是人工审定的，见 VOCAB 注释）")
     a = ap.parse_args()
+
+    ONLY[:] = a.only
 
     fn, eng = engine()
     use_vocab = not a.no_vocab

@@ -838,13 +838,23 @@ def play_block(i, p, kmap, ind=""):
     else:
         cases = (f"\n  - 暂无可直接参照的公开案例 —— 本条按下方原理推导执行，"
                  f"上线前先小范围试跑一周再决定是否放量")
-    # 逐步骤实操：每步都写清「动作 / 谁做 / 时间 / 物料·话术 / 产出」
+    # 逐步骤实操（**2026-09-20 改版**）：
+    #   ⚠️ 原来把 4 个字段挤在一行（`动作 ｜ 时间：【填】 ｜ 谁做：…`）——两个问题：
+    #   ① **在 Word 里折成一团**（用户截图反馈「这个位置很乱，全都换行吧」）；
+    #   ② **根本没有「怎么做」这一栏** → 填出来只有「做什么」，没有「怎么做到」
+    #      （用户原话：「不够具体，太空泛了，要详细很多，**每一步怎么做都要输出**」）。
+    #   → 每步拆成 6 行：动作 ／ **怎么做** ／ 时间 ／ 谁做 ／ 物料·话术 ／ 产出。
+    #     缩进用 `     - `（build_docx 对缩进 ≥2 的列表会按层级缩进，不是压平）。
     steps = parse_steps(p["howto"])
     if steps:
-        s_lines = [
-            f"  {k}. {_t2s_light(act)} ｜ 时间：{FILL} ｜ 谁做：{FILL} ｜ 物料·话术：{FILL} ｜ 产出：{_t2s_light(out) or FILL}"
-            for k, (act, out) in enumerate(steps, 1)
-        ]
+        s_lines = []
+        for k, (act, out) in enumerate(steps, 1):
+            s_lines.append(f"  {k}. {_t2s_light(act)}")
+            s_lines.append(f"     - **怎么做**：{FILL}")
+            s_lines.append(f"     - 时间：{FILL}")
+            s_lines.append(f"     - 谁做：{FILL}")
+            s_lines.append(f"     - 物料·话术：{FILL}")
+            s_lines.append(f"     - 产出：{_t2s_light(out) or FILL}")
         howto = "\n".join(s_lines)
     else:
         howto = "  1. " + FILL

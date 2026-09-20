@@ -421,6 +421,22 @@ def main():
     if not quiet:
         print("\n【1】文档结构（完整版九部分；**精炼版可省「现状分析」**）")
     body = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)  # 去掉 front matter
+
+    _FULL_MARKS = (
+        ("现状分析", "诊断", "现状"),          # 第一章：现状／诊断
+        ("策略",),                              # 第二章
+        ("定位与口径", "定位"),                  # 第三章
+        ("预算明细", "预算"),                    # 预算章
+    )
+    _is_full_plan = all(any(k in body for k in _v) for _v in _FULL_MARKS)
+
+    def _hard_if_full(msg):
+        """完整版才判硬错误；速览类快案降为警告。（判据：_is_full_plan）"""
+        if _is_full_plan:
+            hard_errors.append(msg)
+        else:
+            warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
+
     optional_missing = []
     for name, keys, optional_only in SECTIONS:
         hit = any(k in body for k in keys)
@@ -808,6 +824,42 @@ def main():
                 f"打法 {thin} 的「具体动作」不足 3 个编号步骤 —— 每条打法须写到「精准到每一步」"
                 "（动作／谁做／时间／物料·话术／产出），不能只写一句话"
             )
+    # 7e-2（2026-09-20 新增）**每一步都必须写「怎么做」** ——
+    #   用户原话：「不够具体，太空泛了，要详细很多，**每一步怎么做都要输出**」。
+    #   原来 7e 只查「≥3 个编号步骤」→ 于是「做什么」写三步就过关，而「怎么做到」一字没有。
+    #   ⚠️ 分两种情况报（免得旧稿被刷屏）：
+    #     · 整块**一个「怎么做」都没有** → 判定为「旧版骨架产的稿」→ 报一条总括；
+    #     · 有该栏但**部分没填/过短** → 逐条报，指出差几步。
+    _STEP = re.compile(r"(?m)^\s*\d+[.、]")
+    _HOW = re.compile(r"(?m)^\s*-\s*\*\*怎么做\*\*[：:]\s*(.*)$")
+    _legacy, _unfilled = [], []
+    for _pi, _b in enumerate(p_blocks, 1):
+        _ns = len(_STEP.findall(_b))
+        _how = _HOW.findall(_b)
+        if _ns == 0:
+            continue
+        if not _how:
+            _legacy.append(f"打法{_pi}")
+            continue
+        _ok_n = sum(1 for _h in _how if _zh(_h) >= 12)
+        if _ok_n < _ns:
+            _unfilled.append(f"打法{_pi}（{_ok_n}/{_ns} 步）")
+    if _legacy and not quiet:
+        print(f"  {NG} 有 {len(_legacy)} 条打法的步骤里**没有「怎么做」这一栏**"
+              f"（{'、'.join(_legacy[:4])}{'…' if len(_legacy) > 4 else ''}）")
+    if _legacy:
+        _hard_if_full(
+            f"{len(_legacy)} 条打法的实操**缺「怎么做」栏** —— 用的是旧版骨架。"
+            "「做什么」不等于「怎么做到」：每一步都要写到**换个人照着也能做**"
+            "（方法／工具／判据），否则就是空泛。请用新版 `composer.py` 重新出骨架后再填。")
+    if _unfilled:
+        if not quiet:
+            print(f"  {NG} 有 {len(_unfilled)} 条打法**部分步骤的「怎么做」没写或过短**："
+                  f"{'、'.join(_unfilled[:4])}{'…' if len(_unfilled) > 4 else ''}")
+        _hard_if_full(
+            f"这些打法的部分步骤没写「怎么做」：{'、'.join(_unfilled[:6])} —— "
+            "每条打法的**每一步**都要有「怎么做」，且写到可执行（含方法／工具／判据，≥12 实字）；"
+            "只写「做什么」是空泛，不是方案。")
 
     # 8) 知识展开度（2026-09-17 **反转**）
     #
@@ -1244,20 +1296,9 @@ def main():
     #   （见 `references/范例/便利店开学季战役-交付稿.md`）。于是那份**真稿被判成「速览类」**，
     #   **所有硬关被降级成警告**（等于对它没有任何硬约束）。
     #   这是「判据用一个字面词去认结构」的老毛病：**同一章的两种叫法都要认**。
-    _FULL_MARKS = (
-        ("现状分析", "诊断", "现状"),          # 第一章：现状／诊断
-        ("策略",),                              # 第二章
-        ("定位与口径", "定位"),                  # 第三章
-        ("预算明细", "预算"),                    # 预算章
-    )
-    _is_full_plan = all(any(k in body for k in _v) for _v in _FULL_MARKS)
-
-    def _hard_if_full(msg):
-        """完整版才判硬错误；速览类快案降为警告。（判据：_is_full_plan）"""
-        if _is_full_plan:
-            hard_errors.append(msg)
-        else:
-            warnings.append(msg + "（速览类快案可忽略；若本案其实是完整版请补）")
+    # ⚠️ 2026-09-20：`_is_full_plan` 与 `_hard_if_full` **已上移到 `body` 定义之后**
+    #   （原来的位置仍晚于 7e 等判据 → 早段判据一调用就 `UnboundLocalError`，本次实测复发）。
+    #   同一件事只留一个表达式：**要改就改那一处**。
 
 
 

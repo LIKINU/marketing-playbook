@@ -201,12 +201,28 @@ def render_markdown(doc, md_text, fn=None):
             level = len(m.group(1))
             text = strip_inline(m.group(2)).strip()
             text = re.sub(r"\[\^[^\]]+\]", "", text)   # 标题里的脚注标记直接去掉（标题不需要出处）
-            if level <= 3:
-                h = doc.add_heading(level=min(level, 3))
+            # ⚠️ 2026-09-20 修**大纲层级**（用户反馈「章节太少了」的真实原因）：
+            #   原实现 `level = # 号数` 直接映射 → `##`（**方案的「章」**，骨架里 24 个）
+            #   变成 **Heading 2**，而 Heading 1 只有「目录」＋文档标题（`#`）。
+            #   结果：Word 导航窗格与目录里，**加粗的「章」级条目只有 1 条**，
+            #   24 个章节全缩进成二级小条目 → 看着就像「只有两三章」。
+            #   骨架的层级语义本来就是：`#`＝文档标题 / `##`＝章 / `###`＝节（已核对 skeleton.md）。
+            #   → **整体上移一级**：`#` 用 Title 样式且**不进目录**（它已印在封面），
+            #     `##`→Heading1（章）、`###`→Heading2（节）、`####`→Heading3（小节）。
+            #   **字号沿用原 raw level 的阶梯（18/14/12），只改大纲级别** —— 视觉不变，只修层级。
+            if level == 1:
+                h = doc.add_heading(level=0)          # Title：文档标题，不占章节层级、不进目录
                 r = h.add_run(text)
-                set_run_font(r, size={1: 18, 2: 14, 3: 12}.get(level, 11), bold=True,
+                set_run_font(r, size=18, bold=True, color=RGBColor(0x1F, 0x1F, 0x1F))
+                i += 1
+                continue
+            if level <= 4:
+                _newlvl = level - 1
+                h = doc.add_heading(level=min(_newlvl, 3))
+                r = h.add_run(text)
+                set_run_font(r, size={2: 14, 3: 12, 4: 11}.get(level, 11), bold=True,
                              color=RGBColor(0x1F, 0x1F, 0x1F))
-                headings.append((level, text))
+                headings.append((_newlvl, text))
             else:
                 add_paragraph_with_bold(doc, f"■ {text}", size=10.5, fn=fn)
                 headings.append((4, text))

@@ -94,23 +94,31 @@ def d2_doc_drift():
     #   属于「靠人记得」）。这类「文档与实现不一致」正是本库最烦的漂移之一。
     #   → 把「关数」变成一个**机器对账**的量：selfcheck 的最大关号 == 文档里写的关数。
     try:
-        _sc = re.search(r"^\s*#\s*(\d+)\)", open(os.path.join(ROOT, "scripts", "selfcheck.py"),
-                                                encoding="utf-8").read(), re.M)
-        _all = [int(m) for m in re.findall(r"^\s*#\s*(\d+)\)", open(
-            os.path.join(ROOT, "scripts", "selfcheck.py"), encoding="utf-8").read(), re.M)]
-        _real = max(_all) if _all else 0
-        for _f, _pat in (("", r"(\d+)\s*关机械自检"),
-                         ("README.md", r"(\d+)\s*关自检分别在挡什么")):
+        # ⚠️ **用生成器那一份清单**（`.scan_checks()`），不自己解析 ——
+        #   否则又是「同一件事两个表达式」，两边各缺一半（本次就是这么踩的：
+        #   `` 只扫 print → 1–18；我的护栏只扫注释 → 1–11/19–33）。
+        _sys_path = os.path.join(ROOT, "scripts")
+        if _sys_path not in sys.path:
+            sys.path.insert(0, _sys_path)
+        import                       # noqa: E402
+        _real = len(.scan_checks())
+        # ⚠️ 检查**所有关数声明**，不只标题那处 —— 实测 README 里一共 4 处写关数
+        #   （行 34 摘要 / 行 63 脚本表 / 行 84 标题 / 行 347 第六节），
+        #   只改一处＝另外三处继续骗人。判据：`N 关` 且其后 8 字内含「自检」或「机械」。
+        for _f in ("", "README.md"):
             _fp = os.path.join(ROOT, _f)
             if not os.path.exists(_fp):
                 continue
-            _m = re.search(_pat, open(_fp, encoding="utf-8").read())
-            if _m and int(_m.group(1)) != _real:
-                add("文档漂移", f"{_f}（『N 关自检』）",
-                    f"写的 {_m.group(1)}，selfcheck 实际到 【{_real}】",
+            _txt = open(_fp, encoding="utf-8").read()
+            for _m in re.finditer(r"(\d+)\s*关(?=[^\n]{0,8}(?:自检|机械))", _txt):
+                if int(_m.group(1)) == _real:
+                    continue
+                _ln = _txt[:_m.start()].count("\n") + 1
+                add("文档漂移", f"{_f}:{_ln}（『N 关自检』）",
+                    f"写的 {_m.group(1)}，selfcheck 实际 {_real} 关",
                     "读者按这个数字判断自检覆盖面；对不上＝文档没跟上实现"
-                    "（2026-09-20 实测：两处一直写 18 关，而实现早已到 32 关，19–32 无人记载）",
-                    f"改成 {_real}，并把缺的关卡补进清单（加关时必须同步这两处）", 2)
+                    "（2026-09-20 实测：两处长期写 18 关，而实现早已到 33 —— 根因是抽取器只扫 print 字符串）",
+                    f"改成 {_real}（ 由  生成，改生成器；README 手改）", 2)
     except Exception as _e:
         print(f"  {WARN} 关数对账跳过（{type(_e).__name__}）：{_e}")
 

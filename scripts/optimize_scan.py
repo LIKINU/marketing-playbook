@@ -87,6 +87,33 @@ def d2_doc_drift():
             f"写的 {m.group(1)}，实际 {n_scripts}",
             "读者按这个数字判断工具面有多大；对不上＝文档没跟上代码",
             f"改成 {n_scripts}（并把 CLI 数写成 {n_cli}）", 2)
+    # ── D5 文档声明的「关数」≠ selfcheck 实际关数（2026-09-20 加）────────────────
+    # 为什么加它：2026-09-20 要加【33】时才发现，`` §五 与 `README` §0.3
+    #   **一直写着「18 关」**，而 selfcheck 早已长到 32 关 —— **19–32 全仓无任何记载**。
+    #   根因是：加关时没人同步文档，而**没有任何判据查过这件事**（`impact.py` 只在改档时提醒，
+    #   属于「靠人记得」）。这类「文档与实现不一致」正是本库最烦的漂移之一。
+    #   → 把「关数」变成一个**机器对账**的量：selfcheck 的最大关号 == 文档里写的关数。
+    try:
+        _sc = re.search(r"^\s*#\s*(\d+)\)", open(os.path.join(ROOT, "scripts", "selfcheck.py"),
+                                                encoding="utf-8").read(), re.M)
+        _all = [int(m) for m in re.findall(r"^\s*#\s*(\d+)\)", open(
+            os.path.join(ROOT, "scripts", "selfcheck.py"), encoding="utf-8").read(), re.M)]
+        _real = max(_all) if _all else 0
+        for _f, _pat in (("", r"(\d+)\s*关机械自检"),
+                         ("README.md", r"(\d+)\s*关自检分别在挡什么")):
+            _fp = os.path.join(ROOT, _f)
+            if not os.path.exists(_fp):
+                continue
+            _m = re.search(_pat, open(_fp, encoding="utf-8").read())
+            if _m and int(_m.group(1)) != _real:
+                add("文档漂移", f"{_f}（『N 关自检』）",
+                    f"写的 {_m.group(1)}，selfcheck 实际到 【{_real}】",
+                    "读者按这个数字判断自检覆盖面；对不上＝文档没跟上实现"
+                    "（2026-09-20 实测：两处一直写 18 关，而实现早已到 32 关，19–32 无人记载）",
+                    f"改成 {_real}，并把缺的关卡补进清单（加关时必须同步这两处）", 2)
+    except Exception as _e:
+        print(f"  {WARN} 关数对账跳过（{type(_e).__name__}）：{_e}")
+
     # ── D4 助手名被局部变量遮蔽（2026-09-19 加）──────────────────────────────
     # 症状：`scripts/*.py` 里把**模块级助手名**又当成普通变量名用了一次（如 `_cells = [...]`），
     #   于是同一个函数里所有嵌套 def 引用它时变成「未绑定的自由变量」→
@@ -112,8 +139,10 @@ def d2_doc_drift():
             _clash = sorted(_locals & _mod_funcs)
             if _clash:
                 add("助手名遮蔽", f"{os.path.basename(_f)}:{_node.lineno}（函数 {_node.name}）",
-                    f"局部变量用了模块级助手名：{'、'.join(_clash)} —— 会让嵌套 def 里的同名引用"
-                    f"变成未绑定自由变量（NameError）", "改局部变量名（加后缀），不要改助手名", 3)
+                    f"局部变量用了模块级助手名：{'、'.join(_clash)}",
+                    "会让嵌套 def 里的同名引用变成「未绑定自由变量」→ NameError；"
+                    "静态检查（ast）看不出，只在跑到那一段时炸（本库栽过两次：_mk、_cells）",
+                    f"把局部变量改名（加后缀），不要动助手名", 3)
     m = re.search(r"A 接口（(\d+) 支 CLI 脚本", skill)
     if m and int(m.group(1)) != n_cli:
         add("文档漂移", "SKILL.md（verify_all 行『A 接口（N 支 CLI 脚本）』）",

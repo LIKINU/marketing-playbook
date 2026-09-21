@@ -109,7 +109,7 @@ def l1(quiet):
         # ①a 裸文件名引用：反引号里只有文件名（不带目录前缀）
         for m in BARE_PAT.finditer(_src):
             _b = m.group(1).strip()
-            if _b in ("SKILL.md", "AGENTS.md", "README.md", "") or "*" in _b:
+            if _b in ("SKILL.md", "AGENTS.md", "README.md", "AGENT-BRIEF.md") or "*" in _b:
                 continue          # 入口文件与通配写法不查
             if (_b in BARE_WHITELIST
                     or _b.startswith(("-", "…", "（", "("))
@@ -444,7 +444,7 @@ def l8(quiet):
         if any(s in f for s in PRIVATE_SKIP_DIR) or os.path.basename(f) == me:
             continue
         rel = os.path.relpath(f, ROOT)
-        if "12-范式库" in rel or rel.startswith("优化记录"):
+        if "12-范式库" in rel or rel.startswith("优化轮次"):
             continue                      # 生成物与过程记录不参与对账（源头在 composer／paradigm_data）
         try:
             t = read(f)

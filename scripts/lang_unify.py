@@ -461,7 +461,7 @@ def main():
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(s)
             print(f"\n✅ 已转换 {len(changed)} 个档。")
-            print("   下一步（**顺序重要**）：① 重生成生成物：build_paradigm --doc-map／／"
+            print("   下一步（**顺序重要**）：① 重生成生成物：build_paradigm --doc-map／agent_brief／"
                   "case_play_index --fix"
                   "\n                      ② 回归：smoke_test ＋ kb_audit ＋ verify_all（按需 -n）")
     else:

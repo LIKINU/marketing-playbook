@@ -88,24 +88,29 @@ def d2_doc_drift():
             "读者按这个数字判断工具面有多大；对不上＝文档没跟上代码",
             f"改成 {n_scripts}（并把 CLI 数写成 {n_cli}）", 2)
     # ── D5 文档声明的「关数」≠ selfcheck 实际关数（2026-09-20 加）────────────────
-    # 为什么加它：2026-09-20 要加【33】时才发现，`` §五 与 `README` §0.3
+    # 为什么加它：2026-09-20 要加【33】时才发现，摘要档 §五 与 `README` §0.3
     #   **一直写着「18 关」**，而 selfcheck 早已长到 32 关 —— **19–32 全仓无任何记载**。
     #   根因是：加关时没人同步文档，而**没有任何判据查过这件事**（`impact.py` 只在改档时提醒，
     #   属于「靠人记得」）。这类「文档与实现不一致」正是本库最烦的漂移之一。
     #   → 把「关数」变成一个**机器对账**的量：selfcheck 的最大关号 == 文档里写的关数。
     try:
-        # ⚠️ **用生成器那一份清单**（`.scan_checks()`），不自己解析 ——
+        # ⚠️ **用生成器那一份清单**（`scan_checks()`），不自己解析 ——
         #   否则又是「同一件事两个表达式」，两边各缺一半（本次就是这么踩的：
-        #   `` 只扫 print → 1–18；我的护栏只扫注释 → 1–11/19–33）。
+        #   抽取器只扫 print → 1–18；我的护栏只扫注释 → 1–11/19–33）。
         _sys_path = os.path.join(ROOT, "scripts")
         if _sys_path not in sys.path:
             sys.path.insert(0, _sys_path)
-        import                       # noqa: E402
-        _real = len(.scan_checks())
+        try:
+            import agent_brief                  # noqa: E402
+        except ImportError as _e:
+            # 关数抽取器不在（公开仓库不含它 —— 与 skill 无关的内部件已移出）
+            # → 这项没有权威值可比，交给外层 except 报「跳过」，不影响其余检查
+            raise RuntimeError(f"关数抽取器不在：{_e}") from _e
+        _real = len(agent_brief.scan_checks())
         # ⚠️ 检查**所有关数声明**，不只标题那处 —— 实测 README 里一共 4 处写关数
         #   （行 34 摘要 / 行 63 脚本表 / 行 84 标题 / 行 347 第六节），
         #   只改一处＝另外三处继续骗人。判据：`N 关` 且其后 8 字内含「自检」或「机械」。
-        for _f in ("", "README.md"):
+        for _f in ("AGENT-BRIEF.md", "README.md"):
             _fp = os.path.join(ROOT, _f)
             if not os.path.exists(_fp):
                 continue
@@ -118,7 +123,7 @@ def d2_doc_drift():
                     f"写的 {_m.group(1)}，selfcheck 实际 {_real} 关",
                     "读者按这个数字判断自检覆盖面；对不上＝文档没跟上实现"
                     "（2026-09-20 实测：两处长期写 18 关，而实现早已到 33 —— 根因是抽取器只扫 print 字符串）",
-                    f"改成 {_real}（ 由  生成，改生成器；README 手改）", 2)
+                    f"改成 {_real}（摘要档由生成器产出，改生成器；README 手改）", 2)
     except Exception as _e:
         print(f"  {WARN} 关数对账跳过（{type(_e).__name__}）：{_e}")
 

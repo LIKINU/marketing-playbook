@@ -15,7 +15,7 @@
                       不改任何实质内容 —— 这是唯一机械安全的动作
 
 用法：
-    python scripts/backlog_cleanup.py --report 存量清理清单.md
+    python scripts/backlog_cleanup.py --report 优化轮次/存量清理清单.md
     python scripts/backlog_cleanup.py --annotate --dry-run    # 先看要改多少行
     python scripts/backlog_cleanup.py --annotate              # 真写入（纯标记）
 """

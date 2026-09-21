@@ -191,6 +191,25 @@ VOCAB_KEEP = [
 ]
 
 
+# ── 字体层例外：这些词里的字**不是繁体**，是规范字／专名用字 ──────────────────
+# 与 `VOCAB_KEEP` 是同一类问题（「公司档案」的「档案」不是「文件」），
+# 只是发生在**字体层**：引擎退到 `t2s_data` 字级表时（opencc 不可用），
+# 下面这些字会被**逐字**换掉，而它们本来就是对的中文 —— 换了就是错字。
+#
+# 2026-09-21 实测（本仓库真实语料：报告 71 处「繁体」里 **38 处是这一类**）：
+#   `吒→咤`：《哪吒之魔童闹海》《哪吒汽车》《哪吒 2》→「哪咤」
+#            —— 「吒」本身就是规范字（「哪吒」用「吒」，「叱咤风云」才用「咤」）
+#   `乾→干`：「乾坤圈」造型书签 →「干坤圈」 —— 「乾」读 qián 时简体仍写「乾」
+#   `尅→克`：「尅街」（街区专名）→「克街」
+#
+# ⚠️ 护栏放在**本档**，不放 `t2s_data.py`：那张表是「扫描语料 → 逐字转换」机械生成的
+#    （见其档头），它根本不知道「哪咤」是错的 —— 下次重新生成，错映射还会回来。
+#    「这个词不能换」是**使用方的纪律**，所以留在这一层。
+FONT_KEEP = [
+    "哪吒", "乾坤", "尅街",
+]
+
+
 
 def engine():
     """回传 (convert_fn, 引擎名)。不静默降级 —— 用了哪个、为什么，都要说出来。"""
@@ -260,6 +279,29 @@ def apply_vocab(t):
     return t
 
 
+def apply_font_keep(t, fn):
+    """字体层专名护栏：先给专名上哨兵 → 跑引擎 → 还原。
+
+    为什么必须有：`engine()` 在 opencc 缺席时退回**字级**表，字级表逐字查表，
+    不知道「哪吒」是一个词 —— 它只会看见「吒」这个字，然后换成「咤」。
+    结果是**通顺的中文里出现一个错字**，比繁体本身更坏（繁体一眼看得出，
+    错字要看很久），而且它会随转换器一起流进交付稿。
+
+    哨兵用 `\\x01` 与控制字符区间，与 `apply_vocab` 用的 `\\x00` 区分开 ——
+    两层护栏在同一份文本上先后生效，不共用编号免得还原时互相顶掉。
+    """
+    safe = {}
+    for i, ph in enumerate(FONT_KEEP):
+        if ph in t:
+            tok = f"\x01{i}\x01"
+            safe[tok] = ph
+            t = t.replace(ph, tok)
+    t = fn(t)
+    for tok, ph in safe.items():
+        t = t.replace(tok, ph)
+    return t
+
+
 def non_idempotent_keys():
     """合成探针：找出「替换结果仍能被自己再匹配」的键。
 
@@ -284,10 +326,10 @@ def convert_text(t, fn, use_vocab=True):
     """
     lines = t.split("\n")
     keep = {i for i, ln in enumerate(lines) if KEEP_RE.search(ln)}
-    conv = fn(t).split("\n")
+    conv = apply_font_keep(t, fn).split("\n")
     if len(conv) != len(lines):
         # 换行数变了（不该发生）→ 退回逐行，安全优先
-        conv = [fn(ln) for ln in lines]
+        conv = [apply_font_keep(ln, fn) for ln in lines]
     for i in range(len(conv)):
         if i in keep:
             conv[i] = lines[i]

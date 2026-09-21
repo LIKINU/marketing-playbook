@@ -55,9 +55,14 @@ FIXERS = [
     # 交付稿结构表由 paradigm_data 生成并写回 README —— 挂在幂等压测里，
     # 改骨架忘了更新 README 会被第 2 轮的哈希漂移直接抓出来。
     ("build_paradigm.py", ["--doc-map", "README.md"]),
-    # AGENT-BRIEF 同理：改架构忘了更新它，第二轮的哈希漂移会直接抓出来。
+    # 仓库快照生成器同理：改架构忘了更新它，第二轮的哈希漂移会直接抓出来。
     ("agent_brief.py", []),
 ]
+# 2026-09-21：只跑**仓库里实际存在**的脚本。
+#   有些生成器属于「与 skill 无关的内部件」、不随仓库分发（已进 .gitignore），
+#   在别的机器上缺席是正常现象 —— 不该让压测报假失败。
+FIXERS = [(s, a) for s, a in FIXERS
+          if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), s))]
 # 只读型（每次输出必须一致）
 READERS = [
     ("case_upgrade.py", []),

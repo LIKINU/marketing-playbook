@@ -41,7 +41,21 @@ from _common import OK, NG, WARN, HINT, INFO, TRAD_HINT   # noqa: E402  统一�
 
 # ---------- 字体与页码工具 ----------
 
+# ── 模板模式（2026-09-22）：用外部 .docx 作者给的「文档格式」当基底 ──────────────
+#   用户给来一份《格式一.docx》（纯样式模板：正文宋体 12pt／标题 黑体·宋体·楷体 14pt，
+#   A4 上下 2.54cm 左右 3.17cm）说「骨架修改成这个格式」。
+#   ⚠️ 关键点：**模板模式下不能直设字体/字号/颜色** —— 直设格式（run 级）会盖掉样式表，
+#      模板那套「靠字体区分层级、字号统一 14pt」就全废了。所以这里把它降成 no-op（只保留加粗）。
+USE_TEMPLATE = False
+
+
 def set_run_font(run, size=None, bold=None, color=None, font=CN_FONT):
+    if USE_TEMPLATE:
+        # 模板模式：只保留「加粗」这一个显式属性（行内 **粗体** 仍要生效），
+        # 字体／字号／颜色一律交给模板样式表 —— 这是「按这个格式」的前提。
+        if bold is not None:
+            run.font.bold = bold
+        return
     run.font.name = font
     r = run._element
     rPr = r.get_or_add_rPr()
@@ -213,15 +227,17 @@ def render_markdown(doc, md_text, fn=None):
             if level == 1:
                 h = doc.add_heading(level=0)          # Title：文档标题，不占章节层级、不进目录
                 r = h.add_run(text)
-                set_run_font(r, size=18, bold=True, color=RGBColor(0x1F, 0x1F, 0x1F))
+                if not USE_TEMPLATE:
+                    set_run_font(r, size=18, bold=True, color=RGBColor(0x1F, 0x1F, 0x1F))
                 i += 1
                 continue
             if level <= 4:
                 _newlvl = level - 1
                 h = doc.add_heading(level=min(_newlvl, 3))
                 r = h.add_run(text)
-                set_run_font(r, size={2: 14, 3: 12, 4: 11}.get(level, 11), bold=True,
-                             color=RGBColor(0x1F, 0x1F, 0x1F))
+                if not USE_TEMPLATE:
+                    set_run_font(r, size={2: 14, 3: 12, 4: 11}.get(level, 11), bold=True,
+                                 color=RGBColor(0x1F, 0x1F, 0x1F))
                 headings.append((_newlvl, text))
             else:
                 add_paragraph_with_bold(doc, f"■ {text}", size=10.5, fn=fn)
@@ -292,6 +308,11 @@ def main():
     ap.add_argument("--author", default="", help="封面署名")
     ap.add_argument("--banned", default="", help="自订禁用词表 JSON")
     ap.add_argument("--rules", default="", help="《任务规则表》JSON —— **没提供会拒绝出稿**（用来强制『先问用户』）")
+    ap.add_argument("--template", default="",
+                    help="用这份 .docx 当基底：继承它的样式表／页面设置／页眉页脚，"
+                         "正文与标题不再直设字体字号（＝「按客户给的文档格式出稿」）")
+    ap.add_argument("--no-page-number", action="store_true",
+                    help="模板模式下不加页码（默认加）")
     ap.add_argument("--no-cover", action="store_true", help="不生成封面（省约 1 页）—— 页数紧张时用")
     ap.add_argument("--no-toc", action="store_true", help="不生成目录（省约 1 页）—— 5 页以内的小文档建议加上")
     ap.add_argument("--skip-check", action="store_true",
@@ -397,18 +418,32 @@ def main():
         print(f"{WARN} 交付稿疑似繁体（{len(_hit)} 种繁体字：{'、'.join(_hit[:12])}…）")
         print(f"{WARN} SKILL 要求对外交付稿用**简体**；请先本地化再交付。")
 
-    doc = Document()
-    # 页面设定
-    for section in doc.sections:
-        section.top_margin = Cm(2.5); section.bottom_margin = Cm(2.2)
-        section.left_margin = Cm(2.6); section.right_margin = Cm(2.6)
-        add_page_number_footer(section)
+    global USE_TEMPLATE
+    USE_TEMPLATE = bool(args.template)
+    if USE_TEMPLATE:
+        if not os.path.exists(args.template):
+            print(f"{NG} 模板档不存在：{args.template}")
+            sys.exit(1)
+        # 模板模式：以模板为基底 —— 样式表／页面设置／页眉页脚全部继承，**不再直设**
+        doc = Document(args.template)
+        for section in doc.sections:      # 页码仍要（交付稿要能翻），可用 --no-page-number 关
+            if not args.no_page_number:
+                add_page_number_footer(section)
+        print(f"  模板模式：基底 = {os.path.basename(args.template)}"
+              f"（正文与标题字号继承模板样式表，不再直设）")
+    else:
+        doc = Document()
+        # 页面设定
+        for section in doc.sections:
+            section.top_margin = Cm(2.5); section.bottom_margin = Cm(2.2)
+            section.left_margin = Cm(2.6); section.right_margin = Cm(2.6)
+            add_page_number_footer(section)
 
-    # 预设样式字体
-    normal = doc.styles["Normal"]
-    normal.font.name = CN_FONT
-    normal.font.size = Pt(10.5)
-    normal.element.rPr.rFonts.set(qn("w:eastAsia"), CN_FONT)
+        # 预设样式字体
+        normal = doc.styles["Normal"]
+        normal.font.name = CN_FONT
+        normal.font.size = Pt(10.5)
+        normal.element.rPr.rFonts.set(qn("w:eastAsia"), CN_FONT)
 
     # ---- 封面（--no-cover 可省约 1 页）----
     if args.no_cover:
@@ -422,8 +457,13 @@ def main():
     else:
         for _ in range(4):
             doc.add_paragraph()
-        p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(args.title); set_run_font(r, size=24, bold=True)
+        if USE_TEMPLATE:
+            # 模板模式：封面标题也走模板的 Title 样式（不直设 24pt —— 那会盖掉样式）
+            p = doc.add_paragraph(style="Title"); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.add_run(args.title)
+        else:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(args.title); set_run_font(r, size=24, bold=True)
         if args.subtitle:
             p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             r = p.add_run(args.subtitle); set_run_font(r, size=14, color=RGBColor(0x44, 0x44, 0x44))
@@ -444,7 +484,9 @@ def main():
             headings.append((len(m.group(1)), strip_inline(m.group(2)).strip()))
     if not args.no_toc:
         doc.add_page_break()
-        h = doc.add_heading(level=1); r = h.add_run("目录"); set_run_font(r, size=18, bold=True)
+        h = doc.add_heading(level=1); r = h.add_run("目录")
+        if not USE_TEMPLATE:
+            set_run_font(r, size=18, bold=True)
         for lvl, text in headings:
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Cm(0.5 * (lvl - 1))

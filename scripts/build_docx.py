@@ -593,7 +593,7 @@ def main():
     if FN.order:
         print(f"   · 脚注 {len(FN.order)} 条（Word 页脚就地显示出处，非文末来源表）")
     print(f"   · 正文共 {len(headings)} 个标题节点")
-    print(f"   · 提醒：目录为手工生成，内容有改动时请重新生成本档（Word 不会自动更新）")
+    print(f"   · 提醒：目录是 **Word TOC 域**（已内置当前标题作缓存）；内容改动后在 Word 里选中目录按 F9／「更新域」即可，**不必重新生成本档**")
 
 
 if __name__ == "__main__":

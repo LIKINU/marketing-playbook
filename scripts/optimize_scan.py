@@ -172,12 +172,31 @@ def d2_doc_drift():
             "删掉这些引用，或补上缺的脚本", 2)
     # 反向：脚本存在但文档从未提及
     doc = skill + read(os.path.join(ROOT, "AGENTS.md")) + read(os.path.join(ROOT, "README.md"))
-    unmentioned = sorted(x for x in scripts if x not in doc)
+    unmentioned = sorted(x for x in scripts
+                         if x not in doc and not _is_internal_script(x))
     if unmentioned:
         add("文档漂移", "SKILL.md / AGENTS.md / README.md",
             f"存在但三份文档都没提到的脚本：{'、'.join(unmentioned)}",
             "没人知道它存在，也就没人会跑它 —— 等于半个死代码",
             "要么在脚本表加一行，要么确认可删", 2)
+
+
+def _is_internal_script(name):
+    """这个脚本是不是「不入库的内部件」？
+
+    ⚠️ 2026-09-22（任务书 D4 同源）：`agent_brief.py`／`sync-to-obsidian.sh` 在 `.gitignore` 里
+      （2026-09-21 定的「内部件不进公开仓库」）。若还要求「三份文档必须提到它」，
+      就等于**逼着把内部件写进使用者文档** —— 使用者拿到包却没有这个文件，读到只会困惑。
+    判定**复用 `repo_hygiene.is_gitignored`**（同一件事只留一个表达式）。
+    """
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import repo_hygiene as _rh
+        return _rh.is_gitignored(os.path.join("scripts", name))
+    except Exception as e:
+        print(f"{WARN} 内部件判定跳过（{type(e).__name__}）：{e}")
+        return False
 
 
 # ── D3 重复常量：同一个值在多个脚本里各写一遍 ──

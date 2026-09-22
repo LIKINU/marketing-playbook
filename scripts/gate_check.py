@@ -197,7 +197,7 @@ def main():
     _dl = data.get("delivery") or data.get("交付") or data.get("交付规格") or {}
     if isinstance(_dl, dict):
         _parts = [str(_dl.get(k, "")).strip() for k in
-                  ("结构", "結構", "量级", "量級", "目标长度", "目标字数", "字数硬要求", "页数")]
+                  ("结构", "结构", "量级", "量级", "目标长度", "目标字数", "字数硬要求", "页数")]
         _txt = "；".join(p for p in _parts if p)
         _hit13 = any(a in gate for a in GATE_ITEMS[-1][1])
         if _txt and not _hit13:

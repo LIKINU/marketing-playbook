@@ -90,6 +90,49 @@ def add_page_number_footer(section):
     set_run_font(r2, size=9)
 
 
+IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".emf")
+_PIC_WARN = []
+
+
+def add_image(doc, src, caption="", base_dir="."):
+    """把 `![说明](路径)` 嵌成**居中图片 + 题注**（2026-09-22 · 用户要求「生图逻辑」）。
+
+    做法**对齐用户另一套 skill**（`Marketing-Analysis/scripts/md2docx.py` 的 `add_image`）：
+      居中段落 + `add_picture(width=…)` + `keepLines`（图不跨页断开）+ 题注走 `Caption` 样式。
+    差异：这里的宽度**按当前页面可用宽算**（模板模式下边距更宽），而不是写死 400pt。
+
+    ⚠️ 找不到文件时**显式警告 + 在稿里留一行【缺图】** —— 不静默吞（否则客户拿到的是"图没了"
+    而没人知道）。
+    """
+    path = src if os.path.isabs(src) else os.path.normpath(os.path.join(base_dir, src))
+    cap = caption.strip()
+    if not os.path.exists(path) or os.path.splitext(path)[1].lower() not in IMG_EXT:
+        _PIC_WARN.append(src)
+        print(f"{WARN} 图片不存在或扩展名不支持：{src}（引用处已留【缺图】标记）")
+        p = doc.add_paragraph()
+        r = p.add_run(f"【缺图】{cap or src}")
+        if not USE_TEMPLATE:
+            set_run_font(r, size=9, color=RGBColor(0x99, 0x33, 0x33))
+        return p
+    sec = doc.sections[-1]
+    avail = sec.page_width - sec.left_margin - sec.right_margin
+    w = min(Pt(400), avail)
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run().add_picture(path, width=w)
+    p._p.get_or_add_pPr().insert(0, OxmlElement("w:keepLines"))
+    if cap:
+        if USE_TEMPLATE:
+            c = doc.add_paragraph(style="Caption")
+            c.add_run(cap)
+        else:
+            c = doc.add_paragraph()
+            c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_run_font(c.add_run(cap), size=9, color=RGBColor(0x60, 0x60, 0x60))
+        c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    return p
+
+
 def _fld_para(kind, instr=None):
     """插一个只含「域字符／域指令」的段落（给 TOC 域用）。
 
@@ -181,7 +224,7 @@ def parse_table_block(block_lines):
     return rows
 
 
-def render_markdown(doc, md_text, fn=None):
+def render_markdown(doc, md_text, fn=None, base_dir="."):
     """把 Markdown 渲染进 docx，回传收集到的标题（给目录用）
 
     `fn` = docx_footnote.FootnoteState；传入即启用**真脚注**渲染。
@@ -265,6 +308,14 @@ def render_markdown(doc, md_text, fn=None):
             else:
                 add_paragraph_with_bold(doc, f"■ {text}", size=10.5, fn=fn)
                 headings.append((4, text))
+            i += 1
+            continue
+
+        # 图片（2026-09-22 加）：`![说明](路径)` → 居中图片 + 题注
+        #   ⚠️ 原实现不支持图片 → `![…](…)` 会**原样裸标记落进 docx**（实测确认）。
+        _mimg = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$", s.strip())
+        if _mimg:
+            add_image(doc, _mimg.group(2).strip(), _mimg.group(1), base_dir)
             i += 1
             continue
 
@@ -539,7 +590,7 @@ def main():
 
     # ---- 正文 ----
     doc.add_page_break()
-    render_markdown(doc, md_body, FN)
+    render_markdown(doc, md_body, FN, base_dir=os.path.dirname(os.path.abspath(args.md)))
 
     # ---- 保存 ----
     out = args.output

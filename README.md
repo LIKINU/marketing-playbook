@@ -66,7 +66,7 @@ python scripts/start_here.py --client "客户情况一句话"   # 人／主会�
 | | `build_docx.py` · `reformat_to_template.py` | 生成 `.docx`／按客户范本重排 |
 | **⑤ 质量保障** | `impact.py` | **影响面分析**：改完一处 → 自动算出「必须重跑什么 + 必须同步改什么」 |
 | | `verify_all.py` | 全链路 ＋ **50 遍幂等压测**（仓库必须零漂移） |
-| | `smoke_test.py` | 改完脚本先跑的**快速冒烟测试**（12 项，秒级） |
+| | `smoke_test.py` | 改完脚本先跑的**快速冒烟测试**（秒级；项数见运行输出） |
 | | `kb_audit.py` | 知识库**连通性**审计（L1–L7，专抓「零件合格但传动轴断了」） |
 | | `promise_check.py` | **文档承诺 ↔ 实际执行**对账 |
 | | `optimize_scan.py` | 每轮产出 ≤10 条可优化项 |

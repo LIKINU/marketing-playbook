@@ -154,7 +154,10 @@ def main():
 
     # ⑤ 深度诊断（只诊断）
     # depth_check 默认只诊断；--strict-delivery 时才对三项量化硬指标拦（R2-11）
-    _dep_args = [a.plan] + (["--strict"] if a.strict_delivery else [])
+    # ⚠️ 2026-09-22（任务书 A3）：必须把 --rules 透给 depth_check ——
+    #   否则它不知道本稿是精炼版还是完整版，会拿**完整版阈值**量精炼稿（基准样张自己都 4/9）。
+    _dep_args = ([a.plan, "--rules", a.rules]
+                 + (["--strict"] if a.strict_delivery else []))
     run("depth_check.py", _dep_args, STEPS[4][0])
 
     # ⑥ 出稿

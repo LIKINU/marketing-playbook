@@ -60,7 +60,19 @@ def main():
         1 if re.search(r"❌[^\n]*繁体", _txt) else 0, 0)
     chk("自检（精简版标杆稿·占位不误判）",
         1 if re.search(r"❌[^\n]*【填】", _txt) else 0, 0)
-    chk("深度诊断（只诊断·恒 0）", run("depth_check.py", [plan]), 0)
+    # ⚠️ 2026-09-22 加（任务书 A3 夹具）：**把「基准样张在精炼阈值下不该红」固化成回归**。
+    #   为什么必须固化：这条链曾在**自己的基准样张上**误报（风险 0 条／物料找不到 → 4/9），
+    #   而误报的后果是执行者学会无视整份报告，真信号（重复度／空话）被淹没。
+    #   夹具 = 精炼版样张 ＋ 它的规则表 → 风险/物料/禁用词/竞品 四项不得 ❌ 且达标 ≥8/9。
+    _dp = subprocess.run([PY, os.path.join(HERE, "depth_check.py"), plan, "--rules", rules],
+                         capture_output=True, text=True)
+    _dt = _dp.stdout
+    chk("深度诊断（只诊断·恒 0）", _dp.returncode, 0)
+    _bad4 = [x for x in ("风险", "物料", "禁用词", "竞品") if re.search(rf"❌[^\n]*{x}", _dt)]
+    chk("深度诊断夹具：精炼版样张 风险/物料/禁用词/竞品 无 ❌", 1 if _bad4 else 0, 0)
+    _mk = re.search(r"本次 (\d+)/(\d+) 个维度达标", _dt)
+    chk("深度诊断夹具：精炼版样张达标 ≥8/9",
+        0 if (_mk and int(_mk.group(1)) >= 8) else 1, 0)
 
     # ② composer 三档都能出骨架
     for tier in ["速览", "标准", "G端"]:

@@ -109,6 +109,38 @@ from _common import OK, NG, WARN, HINT, INFO   # noqa: E402  统一符号，不�
 #      **不判定「凑数」、不阻拦出稿** —— 要不要那么长，用户说了算。
 #   3. 量级一律由**门禁第 13 项先问用户**（摘要版／标准版／完整版 + 有无字数限制）。
 # ==========================================================================
+# ── 量级：精炼版 / 完整版（**2026-09-22 加** · 任务书 A3）─────────────────────
+#   根因：本脚本**不读《任务规则表》**，于是拿**完整版阈值**去量**精炼版**样张 ——
+#   连自己的基准样张（`references/范例/便利店开学季战役-交付稿.md`）都只 4/9 达标，
+#   被判「风险维度完全不存在」「物料表格找不到」。后果比误报本身严重：
+#   每次出稿一屏红 ❌ 且多是误报 → **执行者学会无视整份报告**，真信号（重复度／空话）被淹没。
+#   而「量级由用户先选」本来就是门禁第 13 项定下的事（T 表头注释第 3 条自己就这么写）。
+#   → LITE=True 走精炼阈值；False 走完整阈值；None=未声明（未传 --rules，按精炼并在抬头注明）。
+LITE = None
+STRUCT_NOTE = ""
+
+# 精炼版下「留支撑稿」的维度／阈值：不算 ❌，标 N/A。
+#   依据：SKILL 精炼版说明（竞品逐环拆解、禁用词全表、现状数据放支撑稿，不进精炼稿）。
+NA_IN_LITE = {
+    "竞品环节数": "竞品逐环拆解留支撑稿（精炼版不做）",
+    "致命弱点": "同上（精炼版不做竞品拆解）",
+    "次要对手数": "同上",
+    "总竞品数": "同上",
+    "禁用词类别数": "禁用词全表留支撑稿（精炼稿只保留禁用词章＋逐物料对照）",
+    "禁用词条数": "同上",
+}
+
+
+def is_lite():
+    """精炼阈值？（LITE 未声明时按精炼 —— 与门禁默认「5,000–10,000 字标准版」同向取低）"""
+    return LITE is not False
+
+
+def na_reason(key):
+    """该阈值在当前量级下是否「不适用」→ 返回原因字符串（不适用时）"""
+    return NA_IN_LITE.get(key) if is_lite() else None
+
+
 T = {
     # 【1】竞品扫描深度
     "致命弱点": 5,        # 范式档 §5.1 #8（实测 5，「每环节 1 个」）
@@ -358,9 +390,13 @@ def risk_blocks(lines):
       ① 标题含「风险 N」「风险：」（原逻辑）
       ② 标题以编号开头，形如「### R1｜现金风险」「#### R2：…」（稿件实际写法）
     """
+    # ⚠️ 2026-09-22 修（任务书 A3）：真人稿把风险条目标题写成 **`**### 风险 1｜…**`**
+    #   （标题被 `**` 包住）—— 原正则只认行首 `###`，于是**一条都看不见**。
+    #   实测基准样张：5 条风险全部是这种写法 → 被判「风险维度完全不存在」。
+    #   → 允许可选的 `**` 前后包裹（`**### …**` 与 `### …` 都认）。
     n, out = len(lines), []
     for i, ln in enumerate(lines):
-        m = re.match(r"^(#{2,6})\s*(.+?)\s*$", ln)
+        m = re.match(r"^\s*(?:\*\*)?(#{2,6})\s*(.+?)(?:\*\*)?\s*$", ln)
         if not m:
             continue
         title = m.group(2)
@@ -380,7 +416,7 @@ def risk_blocks(lines):
             continue
         level, j = len(m.group(1)), i + 1
         while j < n:
-            m2 = re.match(r"^(#{1,6})\s", lines[j])
+            m2 = re.match(r"^\s*(?:\*\*)?(#{1,6})\s", lines[j])
             if m2 and len(m2.group(1)) <= level:
                 break
             j += 1
@@ -443,6 +479,10 @@ def count_rounds(lines, text):
 
 def check_competitors(lines, text):
     d = Dim(1, "竞品扫描深度")
+    if is_lite() and LITE is not None:
+        # 精炼版：竞品逐环拆解本就留支撑稿（见 NA_IN_LITE 依据）
+        d.ok(f"N/A —— {NA_IN_LITE['竞品环节数']}")
+        return d
 
     weak = len(re.findall(r"致命弱点|致命弱点", text))
     d.ok(f"「致命弱点」出现 {weak} 次（阈值 ≥{T['致命弱点']}）") if weak >= T["致命弱点"] else \
@@ -550,20 +590,39 @@ def check_risks(lines, text):
     elif not no_signal:
         d.ok("预警信号均含量化数字")
 
-    zb_total = len(re.findall(r"兜底", text))
-    need = n_risk * T["兜底系数"]
-    if zb_total >= need:
-        d.ok(f"「兜底」出现 {zb_total} 次（阈值 ≥{need}＝风险数×{T['兜底系数']}）")
+    # ⚠️ 2026-09-22 重写（任务书 A3）：原判据 = 「兜底」二字出现次数 ≥ 风险数×3 ——
+    #   那是**字数代理**（本函数下方注释自己就承认「那是字数代理，套话稿一样过关」）。
+    #   实测基准样张：5 条风险的字面「兜底」只有 10 次（<15）就被判「写得太薄」，
+    #   而其中 3 条其实是**分步兜底**（①…→②…→③…，共 13 步）。
+    #   → 改成两条**内容**判据：① **每条风险都要有兜底**（含「按 X 节顺序砍」这类引用式）；
+    #     ② **分步兜底**（①②③ 或 →）的条数 —— 完整版要求条条分步，精炼版允许引用（降为提示）。
+    has_zb = sum(1 for _t2, _b in blocks if re.search(r"兜底", _b))
+    _step_zb = 0
+    for _t2, _b in blocks:
+        _i2 = _b.find("兜底")
+        if _i2 >= 0 and re.search(r"[①②③④⑤⑥⑦⑧⑨]|→", _b[_i2:]):
+            _step_zb += 1
+    if has_zb >= n_risk:
+        d.ok(f"每条风险都写了兜底（{has_zb}/{n_risk}）")
     else:
-        d.fail(f"「兜底」出现 {zb_total} 次（阈值 ≥{need}＝风险数×{T['兜底系数']}）"
-               "——兜底写得太薄")
+        d.fail(f"有 {n_risk - has_zb} 条风险**没有兜底**（出事了怎么办没写）")
+    if _step_zb >= n_risk:
+        d.ok(f"每条兜底都分步（{_step_zb}/{n_risk}，含 ①②③ 或 → 串起的处置顺序）")
+    elif not is_lite():
+        d.fail(f"只有 {_step_zb}/{n_risk} 条兜底是分步的（完整版要求条条分步：①②③ ＋ 不跳步）")
+    else:
+        d.warn(f"只有 {_step_zb}/{n_risk} 条兜底是分步的 —— 精炼版允许「按 X 节顺序砍」"
+               f"这类**引用式**，但完整版要求条条分步；建议把引用式的补成 ①②③")
 
     if min_steps:
         s = min(min_steps)
         if s >= T["兜底步数"]:
             d.ok(f"每条兜底 ≥{s} 步（范式要求 ≥{T['兜底步数']} 步，且「按触发顺序不要跳步」）")
-        else:
+        elif not is_lite():
             d.fail(f"有风险的兜底只有 {s} 步（阈值 ≥{T['兜底步数']} 步，需 ①②③ 分步）")
+        else:
+            d.warn(f"有风险的兜底只有 {s} 步（完整版要求 ≥{T['兜底步数']} 步）；"
+                   f"精炼版允许引用式，但建议补成 ①②③ 分步")
 
     # 决策推理（2026-09-14 新增）：兜底不能只是「动作堆叠」，必须写明取舍。
     # 旧判据只数「兜底」出现次数与步数 —— 那是字数代理，套话稿一样过关（重跑版即如此：
@@ -586,7 +645,10 @@ def check_risks(lines, text):
     else:
         d.ok(f"每条兜底都写明了取舍理由（{n_risk}/{n_risk} 条）")
 
-    prev = len(re.findall(r"预防性动作|预防性动作", text))
+    # ⚠️ 2026-09-22 修（任务书 A3）：原来只认「预防性动作」这个**全词** ——
+    #   而真人稿写的是「**预防（比兜底更重要）：…**」「预防：…」→ 全词 0 次 → 判「未见预防性动作」。
+    #   实测基准样张 5 条风险各写了 1 条预防（共 5 处），却被判「没有」。→ 词形放宽。
+    prev = len(re.findall(r"预防性动作|预防动作|预防措施|预防\s*[：:（(]", text))
     if prev >= T["预防性动作"]:
         d.ok(f"「预防性动作」出现 {prev} 次（阈值 ≥{T['预防性动作']}）")
     elif prev:
@@ -797,17 +859,34 @@ def check_kpi(lines, all_tables):
 
 def check_materials(lines, all_tables):
     d = Dim(5, "物料清单")
-    rng = find_region(lines, ["物料", "文案", "物料清单", "物料清单"])
-    tbls = tables_in(lines, rng) if rng else []
+    # ⚠️ 2026-09-22 修（任务书 A3）：原来用 `find_region` 取**第一个**命中，
+    #   实测被 `### 5.2 禁用词与红线（物料逐字对照）` 抢先（标题含「物料」但那节没有表）
+    #   → 真物料表（`## 七 · 落地文案与物料（12 件）`）永远找不到，被判「物料维度完全不存在」。
+    #   → 改成扫**所有**含关键词的节（本库老规矩：多目标取所有命中，不取第一个）。
+    _cands = [s for s in doc_sections(lines) if any(k in s[0] for k in ("物料", "文案"))]
+    tbls = []
+    for _tt, _s, _e in _cands:
+        tbls += tables_in(lines, (_s, _e))
+    _seen = set()
+    tbls = [x for x in tbls if not (id(x) in _seen or _seen.add(id(x)))]
     tb = None
     for t in tbls:
-        if col_index(t["header"], ["物料", "品项", "品项", "项目", "项目", "名称", "名称"]) >= 0:
+        if col_index(t["header"], ["物料", "品项", "项目", "名称"]) >= 0:
             if tb is None or len(t["rows"]) > len(tb["rows"]):
                 tb = t
     if tb is None and tbls:
         tb = max(tbls, key=lambda t: len(t["rows"]))
     if tb is None:
-        d.fail("找不到物料清单表格——物料维度完全不存在（范式档 §5.1 #61）")
+        # 兜底：物料也可能是**列表**写法（「编号＋名称＋位置／渠道＋成本」），不只表格
+        _secs = "\n".join(region_text(lines, (_s, _e)) for _tt, _s, _e in _cands)
+        _items = [l for l in _secs.splitlines()
+                  if re.match(r"^\s*(?:[-*]|\d+[.、])\s*\S", l)]
+        _with_cost = [l for l in _items if re.search(r"元|¥|成本|费用", l)]
+        if len(_with_cost) >= 6:
+            d.ok(f"物料以清单形式给出（{len(_with_cost)} 条含成本的物料项；非表格写法，按清单计）")
+            return d
+        d.fail("找不到物料清单（表格或「编号＋名称＋位置＋成本」清单都未见）"
+               "——物料维度完全不存在（范式档 §5.1 #61）")
         return d
 
     rows, n = tb["rows"], len(tb["rows"])
@@ -849,6 +928,15 @@ def check_banned(lines, text):
     # 分类的识别：A 类／A类（原逻辑）＋ 类别一／第一类／类 A（稿件实际写法）
     classes = {next(g for g in m.groups() if g) for m in RE_BANNED_CLASS.finditer(sec)}
     nc = len(classes)
+    if is_lite() and LITE is not None:
+        # 精炼版：**不卡类别数与条数**（全表留支撑稿）——只要求「有禁用词章」＋「标了后果」
+        d.ok(f"精炼版：禁用词章存在（分类 {nc} 类／{len(count_terms(sec))} 条，"
+             f"全表留支撑稿，不卡阈值）")
+        if "后果" in sec or "触发" in sec or "触发" in sec:
+            d.ok("各类禁用词标注了触发后果")
+        else:
+            d.warn("禁用词未标注「触发什么后果」（范式档：每类必须标后果）")
+        return d
     if nc >= T["禁用词类别数"]:
         d.ok(f"禁用词分类 {nc} 类（阈值 ≥{T['禁用词类别数']}，范式档 A–E 各类标后果）")
     elif nc:
@@ -1054,16 +1142,42 @@ def check_repeats(lines, text):
 # ==========================================================================
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
-        print("用法: python depth_check.py <plan.md> [--quiet] [--strict]")
+        print("用法: python depth_check.py <plan.md> [--rules 规则表.json] [--quiet] [--strict]")
         print("  默认只诊断、不阻拦出稿（退出码一律 0，除非脚本自身出错=2）")
         print("  --strict：**仅对三项量化硬指标**（KPI 预警线 0%／风险条目 0／数字密度过低）")
         print("            返回退出码 1 —— 其余维度维持「只提示」。出稿前那一次建议挂上。")
         sys.exit(0)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+    # ── 量级：读《任务规则表》的 delivery（2026-09-22 加）──
+    global LITE, STRUCT_NOTE
+    rules_path = ""
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--rules" and _i + 1 < len(sys.argv):
+            rules_path = sys.argv[_i + 1]
+        elif _a.startswith("--rules="):
+            rules_path = _a.split("=", 1)[1]
+    if rules_path:
+        try:
+            import json as _json
+            _d = _json.load(open(rules_path, encoding="utf-8"))
+            _dl = _d.get("delivery") or _d.get("交付") or _d.get("交付规格") or {}
+            _s = " ".join(str(_dl.get(k, "")) for k in ("结构", "結構", "量级", "量級", "规模", "規模"))
+            if re.search(r"完整|完整版|大賽|大赛|投标|B 端|B端", _s):
+                LITE = False
+            else:
+                LITE = True
+                STRUCT_NOTE = f"（规则表量级：{_s.strip() or '未写'}）"
+        except Exception as _e:
+            LITE = True
+            STRUCT_NOTE = f"（规则表读取失败：{type(_e).__name__}，按精炼阈值）"
+    else:
+        LITE = True
+        STRUCT_NOTE = "（**未传 --rules，按精炼版阈值**；完整版请加 `--rules 规则表.json`）"
     quiet = "--quiet" in sys.argv
     strict = "--strict" in sys.argv
     if not args:
-        print("用法: python depth_check.py <plan.md> [--quiet]")
+        print("用法: python depth_check.py <plan.md> [--rules 规则表.json] [--quiet]")
         sys.exit(1)
     path = args[0]
 
@@ -1091,7 +1205,7 @@ def main():
 
     if not quiet:
         print("=" * 64)
-        print(f"深度校验 · {path}")
+        print(f"深度校验 · {path}{STRUCT_NOTE}")
         print("=" * 64)
 
     passed = 0
@@ -1118,7 +1232,9 @@ def main():
             for w in WARNS:
                 print(f"   · {w}")
         print("\n→ 要不要按以上提示加厚，**由你（或用户）决定**：")
-        print("   本检查默认不设门槛、不阻拦出稿；罗森案原版（精炼版）同样会有这些提示。")
+        print(f"   本检查默认不设门槛、不阻拦出稿；量级＝{'精炼版' if is_lite() else '完整版'}"
+              f"{STRUCT_NOTE}。**基准样张（精炼版）在精炼阈值下不应再出现本节的红项** —— "
+              f"若出现，属识别器缺陷，请报回来。")
         print(f"   （本次 {passed}/{len(dims)} 个维度达标）")
         # ⚠️ 2026-09-17（R2 数据科学视角第 11 条）：depth_check 原本「退出码一律 0」，
         #    于是「KPI 无预警线」「风险 0 条」这类**量化硬伤可以带着 ❌ 交付**，

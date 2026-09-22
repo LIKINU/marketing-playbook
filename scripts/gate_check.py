@@ -91,6 +91,40 @@ def is_filled(v) -> bool:
     return s.lower() not in bad
 
 
+def assign_items(gate: dict, items: list):
+    """把 gate 的字段**全局最优**地分配给各项 → {label: (key, value)}
+
+    ⚠️ 2026-09-22 加（任务书 C5）：原来是「**按 items 的顺序**逐项调用 match_item」——
+      `match_item` 自身虽然做到「精确优先＋最长别名优先」，但它只在**一项之内**比较；
+      **跨项**仍是先到先得。于是实测这种错配：字段「产品合规问题」
+      会被**第 1 项**（别名含短词「产品」）先抢走，轮到第 8 项（别名「合规」）已无字段可挑
+      → **静默归到错的那一项**，而它恰恰决定了要不要挂「行业资质与宣称边界」那一章。
+
+    改法：先枚举**所有**（项, 字段, 匹配强度）候选，再按强度**全局降序**依次分配。
+      强度 = 完全相等(1000) ＞ 别名长度；强的先占，弱者退让。
+      分不掉的字段不硬塞 —— 留在 extra 里提示人工确认（**不静默归位**）。
+    """
+    cands = []
+    for order, (label, aliases) in enumerate(items):
+        for k, v in gate.items():
+            kl = str(k).lower()
+            best = -1
+            for a in aliases:
+                al = str(a).lower()
+                if al and al in kl:
+                    best = max(best, len(al) + (1000 if kl == al else 0))
+            if best >= 0:
+                cands.append((best, -order, label, k, v))   # -order：同强度时靠前的项优先
+    cands.sort(key=lambda x: (-x[0], x[1]))
+    out, used = {}, set()
+    for _score, _ord, label, k, v in cands:
+        if label in out or k in used:
+            continue
+        out[label] = (k, v)
+        used.add(k)
+    return out
+
+
 def match_item(gate: dict, aliases: list, used: set):
     """按别名匹配 gate 里的 key；回传 (key, value) 或 (None, None)。
 
@@ -171,8 +205,9 @@ def main():
 
     used = set()
     missing = []
+    _assigned = assign_items(gate, GATE_ITEMS)     # ← 全局最优分配（2026-09-22 · C5）
     for label, aliases in GATE_ITEMS:
-        k, v = match_item(gate, aliases, used)
+        k, v = _assigned.get(label, (None, None))
         if k is not None:
             used.add(k)
         if k is not None and is_filled(v):
@@ -245,7 +280,7 @@ def main():
                "卖给谁（人群、场景）": 6, "怎么算成功（验收标准）": 8}
     used_q, weak = set(), []
     for label, aliases in GATE_ITEMS:
-        k, v = match_item(gate, aliases, used_q)
+        k, v = _assigned.get(label, (None, None))   # 用同一份分配，避免两处口径不同
         if k is not None:
             used_q.add(k)
         if k is not None and is_filled(v) and label in MIN_LEN and len(str(v).strip()) < MIN_LEN[label]:

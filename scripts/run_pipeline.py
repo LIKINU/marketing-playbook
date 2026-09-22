@@ -161,7 +161,10 @@ def main():
     run("depth_check.py", _dep_args, STEPS[4][0])
 
     # ⑥ 出稿
-    docx_args = [a.plan, "-o", a.out, "--rules", a.rules, "--title", a.title]
+    # ⚠️ 2026-09-22（任务书 C2）：`--already-checked` —— 本管线 ⑤ 已跑过 depth_check，
+    #   build_docx 内部再跑一次会把同一份诊断打两屏（噪声把真信号埋掉）。
+    docx_args = [a.plan, "-o", a.out, "--rules", a.rules, "--title", a.title,
+                 "--already-checked"]
     for flag, val in [("--subtitle", a.subtitle), ("--date", a.date),
                       ("--author", a.author), ("--banned", a.banned)]:
         if val:

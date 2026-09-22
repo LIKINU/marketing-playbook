@@ -90,6 +90,29 @@ def add_page_number_footer(section):
     set_run_font(r2, size=9)
 
 
+def _fld_para(kind, instr=None):
+    """插一个只含「域字符／域指令」的段落（给 TOC 域用）。
+
+    `kind`：begin / separate / end；`instr` 给定则写 `w:instrText`（域指令本身）。
+    为什么不用 python-docx 高层 API：它**没有域（field）接口**，只能写底层 XML。
+    """
+    d = _CUR_DOC[0]
+    p = d.add_paragraph()
+    r = p.add_run()
+    if instr is not None:
+        e = OxmlElement("w:instrText")
+        e.set(qn("xml:space"), "preserve")
+        e.text = instr
+    else:
+        e = OxmlElement("w:fldChar")
+        e.set(qn("w:fldCharType"), kind)
+    r._element.append(e)
+    return p
+
+
+_CUR_DOC = [None]
+
+
 def shade(cell, hexcolor="F2F2F2"):
     tcPr = cell._tc.get_or_add_tcPr()
     shd = OxmlElement("w:shd")
@@ -311,6 +334,12 @@ def main():
     ap.add_argument("--template", default="",
                     help="用这份 .docx 当基底：继承它的样式表／页面设置／页眉页脚，"
                          "正文与标题不再直设字体字号（＝「按客户给的文档格式出稿」）")
+    ap.add_argument("--version", default="", help="封面显示版本号（如 v2／第 3 版）；不传则不显示")
+    ap.add_argument("--font", default="",
+                    help="正文字体（默认 微软雅黑）。⚠️ docx 没有 CSS 式「字体栈」—— Mac／WPS "
+                         "缺该字体时由 Word 自行替换；要精确控制字体请用 --template 走模板样式")
+    ap.add_argument("--already-checked", action="store_true",
+                    help="上游（run_pipeline）已跑过 selfcheck／depth_check → 跳过内部那次重复诊断")
     ap.add_argument("--no-page-number", action="store_true",
                     help="模板模式下不加页码（默认加）")
     ap.add_argument("--no-cover", action="store_true", help="不生成封面（省约 1 页）—— 页数紧张时用")
@@ -363,10 +392,18 @@ def main():
              + (["--banned", args.banned] if args.banned else [])),
         ]
         # ② 只报告、不设门槛：depth_check（要素厚薄 —— 用户定调 2026-09-14：只提示不拦）
-        advisory = [
-            ("深度诊断 depth_check.py",
-             [sys.executable, os.path.join(here, "depth_check.py"), args.md]),
-        ]
+        #   ⚠️ 2026-09-22（任务书 C2）：`run_pipeline.py` 已经跑过一次 depth_check，
+        #     而 build_docx 内部又跑一次 → **同一份报告打两屏**（1,155 行脚本 × 2），
+        #     噪声一多就没人看。→ 加 `--already-checked`：上游跑过就跳过（单独调用仍会诊断）。
+        #   另：把 `--rules` 透给诊断 —— 否则它不知道本稿是精炼还是完整版（A3 的同一根因）。
+        if args.already_checked:
+            print(f"{INFO} 深度诊断已在上游跑过（--already-checked），此处跳过以免重复两屏。\n")
+            advisory = []
+        else:
+            _dep = [sys.executable, os.path.join(here, "depth_check.py"), args.md]
+            if args.rules:
+                _dep += ["--rules", args.rules]
+            advisory = [("深度诊断 depth_check.py", _dep)]
         failed = []
         for name, cmd in checks:
             if not os.path.exists(cmd[1]):
@@ -418,14 +455,17 @@ def main():
         print(f"{WARN} 交付稿疑似繁体（{len(_hit)} 种繁体字：{'、'.join(_hit[:12])}…）")
         print(f"{WARN} SKILL 要求对外交付稿用**简体**；请先本地化再交付。")
 
-    global USE_TEMPLATE
+    global USE_TEMPLATE, CN_FONT
     USE_TEMPLATE = bool(args.template)
+    if args.font:            # 字体可配（Mac/WPS 缺 微软雅黑 时可改）
+        CN_FONT = args.font
     if USE_TEMPLATE:
         if not os.path.exists(args.template):
             print(f"{NG} 模板档不存在：{args.template}")
             sys.exit(1)
         # 模板模式：以模板为基底 —— 样式表／页面设置／页眉页脚全部继承，**不再直设**
         doc = Document(args.template)
+        _CUR_DOC[0] = doc          # 供 _fld_para（TOC 域）取当前文档
         for section in doc.sections:      # 页码仍要（交付稿要能翻），可用 --no-page-number 关
             if not args.no_page_number:
                 add_page_number_footer(section)
@@ -433,6 +473,7 @@ def main():
               f"（正文与标题字号继承模板样式表，不再直设）")
     else:
         doc = Document()
+        _CUR_DOC[0] = doc          # 供 _fld_para（TOC 域）取当前文档
         # 页面设定
         for section in doc.sections:
             section.top_margin = Cm(2.5); section.bottom_margin = Cm(2.2)
@@ -475,6 +516,11 @@ def main():
         if args.author:
             p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             r = p.add_run(args.author); set_run_font(r, size=12)
+        # ⚠️ 2026-09-22（任务书 C1）：封面补**版本号** —— SKILL 要求封面含项目名／日期／版本，
+        #   原实现只有前两者（方案迭代时「这是哪一版」说不清）。
+        if args.version:
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(f"版本：{args.version}"); set_run_font(r, size=11)
 
     # ---- 目录（--no-toc 可省约 1 页；5 页以内的小文档建议省掉）----
     headings = []
@@ -487,11 +533,19 @@ def main():
         h = doc.add_heading(level=1); r = h.add_run("目录")
         if not USE_TEMPLATE:
             set_run_font(r, size=18, bold=True)
+        # ⚠️ 2026-09-22（任务书 C1）：原先是**纯手工列表 → 没有页码**。
+        #   → 改成 **Word TOC 域**，并把同一份标题清单作为**域的缓存结果**塞在 separate 与 end 之间：
+        #     · 不更新域也能正常阅读（渲染的就是这份缓存）；
+        #     · 用户打开后按 F9／「更新域」即可得到**带页码**的目录。
+        _fld_para("begin")
+        _fld_para(None, r' TOC \o "1-3" \h \z \u ')
+        _fld_para("separate")
         for lvl, text in headings:
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Cm(0.5 * (lvl - 1))
             p.paragraph_format.space_after = Pt(2)
             r = p.add_run(text); set_run_font(r, size=10.5 if lvl > 1 else 11.5, bold=(lvl == 1))
+        _fld_para("end")
         doc.add_page_break()
 
     # ---- 正文 ----

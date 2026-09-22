@@ -737,7 +737,9 @@ def main():
         form = "多段文字" if len(combo_marks) >= 3 else "表格"
         if not quiet:
             print(f"  {OK} 打法组合存在（{form}形式，{len(combo_marks)} 条，要素标签 {hit}/7）")
-        if hit < 6:
+        # ⚠️ 2026-09-22 修（任务书 B5）：原来 `hit < 6` —— 7 个要素**允许缺 1 个**，
+        #   而 SKILL 与本函数自己的错误文案都写「缺一不可」。阈值与文档不一致＝文档在骗人。
+        if hit < 7:
             if not quiet:
                 print(f"  {NG} 打法要素标签只命中 {hit}/7")
             hard_errors.append(

@@ -74,7 +74,11 @@ def main():
     chk("深度诊断夹具：精炼版样张达标 ≥8/9",
         0 if (_mk and int(_mk.group(1)) >= 8) else 1, 0)
 
-    # ② composer 三档都能出骨架
+    # ② 数字对账（2026-09-22 加 · 任务书 B5/D6）：文档里写死的数字必须与实测一致。
+    #   为什么挂在这里：这类漂移以前**没有任何判据在管**（同一量在文档里写死多次、每次扩充必过期）。
+    chk("数字对账（stats.py --audit）", run("stats.py", ["--audit"]), 0)
+
+    # ③ composer 三档都能出骨架
     for tier in ["速览", "标准", "G端"]:
         out = os.path.join(tmp, f"sk-{tier}.md")
         chk(f"组装器（{tier} 档）", run("composer.py", [ "--rules", rules, "--out", out, "--tier", tier]), 0)

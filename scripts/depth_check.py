@@ -1162,8 +1162,10 @@ def main():
             import json as _json
             _d = _json.load(open(rules_path, encoding="utf-8"))
             _dl = _d.get("delivery") or _d.get("交付") or _d.get("交付规格") or {}
-            _s = " ".join(str(_dl.get(k, "")) for k in ("结构", "結構", "量级", "量級", "规模", "規模"))
-            if re.search(r"完整|完整版|大賽|大赛|投标|B 端|B端", _s):
+            # ⚠️ 这里**故意保留**三种繁体写法的键名（见下一行行尾的 lang-keep-trad 护栏）：
+            #   旧规则表可能用繁体当 key，转成简体就再也读不到 → 兼容性静默失效。
+            _s = " ".join(str(_dl.get(k, "")) for k in ("结构", "結構", "量级", "量級", "规模", "規模"))  # lang-keep-trad
+            if re.search(r"完整|完整版|大赛|大赛|投标|B 端|B端", _s):
                 LITE = False
             else:
                 LITE = True

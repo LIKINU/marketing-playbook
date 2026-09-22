@@ -49,8 +49,6 @@ python scripts/start_here.py --client "客户情况一句话"   # 人／主会�
 | **⓪ 开场** | `start_here.py` | **开新会话第一条命令**：告诉你「要读哪几份、读哪一节、不要读什么」 |
 | **① 接案** | `flow.py` | 流程向导：告诉你「现在第几步、下一步跑哪条命令」 |
 | | `stats.py` | **全仓数字的唯一事实源**（打法／模型／失败模式／深度卡／脚本数的机器统计）＋ `--audit` 对账文档里写死的数字 |
-| | `agent_brief.py` | **生成 `AGENT-BRIEF.md`**（派 agent 时只给这一份＋1–2 个目标档那一节，避免重读整仓）；关数从 `selfcheck.py` 自动抽取 |
-| | `sync-to-obsidian.sh` | 把本仓快照同步进 **Obsidian 知识库**离线存档（`bash scripts/sync-to-obsidian.sh`；推送时 hook 自动跑） |
 | | `facts_check.py` | **事实底稿校验**：每条事实带「来源层级｜口径｜时点｜可信度」四栏 ＋ 底稿版本与变更记录。`selfcheck` 跑交付稿，管不到这份内部文档，所以单独一支 |
 | | `gate_check.py` | 门禁 13 项核对 → 产出《任务规则表》（另查治理块与「客户行业／已持资质」两项补充） |
 | **② 组装** | `composer.py` | **核心引擎**：把打法／模型／案例／学者机械注入骨架 |

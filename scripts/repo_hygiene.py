@@ -36,7 +36,6 @@ repo_hygiene.py —— 仓库冗余／卫生扫描（存量维护用）
 import argparse
 import hashlib
 import json
-import fnmatch
 import os
 import re
 import shutil
@@ -73,47 +72,11 @@ JUNK_DIR_PAT = re.compile(r"^(?:实测-|实测-|output$|\.archive$)")
 JUNK_EXT = {".pyc", ".pyo", ".swp", ".bak"}
 
 
-# ── 不入库的本机件（.gitignore 覆盖）：**不当仓库资产盘点** ────────────────────
-#   ⚠️ 2026-09-22 加（任务书 D4）：`AGENT-BRIEF.md`／`scripts/agent_brief.py`／
-#      `scripts/sync-to-obsidian.sh` 早已进 `.gitignore`（2026-09-21「内部件不进公开仓库」），
-#      但文件仍在工作树里 → 本脚本**每轮都报「孤儿档」** → 噪声把真问题埋掉
-#      （和 2026-09-19 `解析产物/` 那次同病，那次是往 SKIP_DIRS 打补丁，这次做**通用**处理）。
-#   ⚠️ 为什么不直接从 walk_files 里剔掉：`--clean` 要能列出可删的本机垃圾，
-#      所以只在**孤儿判定**里跳过，并把跳过数**打印出来**（不静默）。
-def gitignore_patterns():
-    pats = []
-    gp = os.path.join(".", ".gitignore")
-    if not os.path.exists(gp):
-        return pats
-    for ln in open(gp, encoding="utf-8"):
-        ln = ln.split("#")[0].strip()          # 行首注释整行跳过；行尾注释 .gitignore 不支持，故这里只作兜底
-        if ln:
-            pats.append(ln)
-    return pats
-
-
-_GITIGNORE = None
-
-
-def is_gitignored(rel):
-    """rel 是否被 .gitignore 覆盖（支持 `目录/`、`*.ext`、普通路径三种写法）。"""
-    global _GITIGNORE
-    if _GITIGNORE is None:
-        _GITIGNORE = gitignore_patterns()
-    r = rel.replace(os.sep, "/")
-    base = os.path.basename(r)
-    for pat in _GITIGNORE:
-        if pat.endswith("/"):
-            d = pat.rstrip("/")
-            if r == d or r.startswith(d + "/") or ("/" + d + "/") in ("/" + r):
-                return True
-        elif "*" in pat:
-            if fnmatch.fnmatch(r, pat) or fnmatch.fnmatch(base, pat):
-                return True
-        else:
-            if r == pat or r.startswith(pat + "/"):
-                return True
-    return False
+# ⚠️ 2026-09-22：这里原本加了一段「孤儿判定跳过 .gitignore 覆盖的件」的逻辑 ——
+#   经自我审查后**退回**：实测那三个内部件（AGENT-BRIEF.md／agent_brief.py／sync-to-obsidian.sh）
+#   被脚本互相引用（verify_all 跑 agent_brief、kb_audit 提 AGENT-BRIEF…）→ hits>0，
+#   跳过与否结果**都是 0 孤儿** → 那段是「防将来」而非修当下，按「不必要就不加」退回。
+#   （判定函数本身留在 `_common.is_gitignored`，`optimize_scan` 有真实消费者。）
 
 
 def is_skipped(rel):
@@ -157,7 +120,6 @@ def find_orphans(files, texts):
     报在 ③ 就好 —— 同一件事报两次会让报告失真，久了没人看。
     """
     orphans = []
-    skipped_ignored = 0
     for rel in files:
         if is_skipped(rel):
             continue
@@ -176,12 +138,7 @@ def find_orphans(files, texts):
                 continue
             hits += txt.count(base) + txt.count(stem)
         if hits <= 0:
-            if is_gitignored(rel):
-                skipped_ignored += 1          # 不入库的本机件：不当资产盘点，但**报出数量**（不静默）
-                continue
             orphans.append({"path": rel, "size": os.path.getsize(rel)})
-    if skipped_ignored:
-        print(f"ℹ️  另有 {skipped_ignored} 个「不入库的本机件」（.gitignore 覆盖）已跳过，不计孤儿")
     return sorted(orphans, key=lambda d: -d["size"])
 
 

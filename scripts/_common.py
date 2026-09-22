@@ -1,3 +1,5 @@
+import fnmatch
+import os
 # -*- coding: utf-8 -*-
 """_common.py — 跨脚本共用的小常量与工具（唯一真相）
 
@@ -98,3 +100,42 @@ PAYBACK_WARN_STORE = 6      # 单店投入回本：> 该月数 → 加盟商大�
 PAYBACK_WARN_AD = 12        # 品牌投放回本（收回获客成本 CAC）：> 该月数 需警惕
 LTV_FORMULA = "客单价 × 毛利率 × 年复购次数 × 留存年限"   # **四因子**，缺任一项口径就不可比
 # ⚠️ 「单店投入回本」与「CAC 回本」是**两个不同口径**，不要合成一个数（详见 composer 的 14.1 注）。
+
+# ── 不入库的件（.gitignore 覆盖）—— 判定放这里，供**多个**校验脚本共用 ────────────
+#   为什么在这：`optimize_scan`（不要求为未入库脚本写文档）与 `repo_hygiene`（原本想用来跳过孤儿）
+#   都需要「这个件入不入库」这一个判定 —— 放 `_common` 只写一次（本库规矩：同一件事只留一个表达式）。
+#
+#   ⚠️ 2026-09-22 经过一次「先加后减」的自我审查：`repo_hygiene` 里**实际用不上**它
+#      （实测那三个内部件被脚本互相引用，本来就 hits>0，跳过与否结果都是 0 孤儿）→
+#      已把 repo_hygiene 那处**退回**，只留 `optimize_scan` 这一处真实消费者。
+def gitignore_patterns(root="."):
+    """读 .gitignore → 模式列表（跳过空行与整行注释）。"""
+    pats, gp = [], os.path.join(root, ".gitignore")
+    if not os.path.exists(gp):
+        return pats
+    for ln in open(gp, encoding="utf-8"):
+        ln = ln.split("#")[0].strip()
+        if ln:
+            pats.append(ln)
+    return pats
+
+
+def is_gitignored(rel, root=".", _cache={}):
+    """rel 是否被 .gitignore 覆盖（支持 `目录/`、`*.ext`、普通路径三种写法）。"""
+    key = root
+    if key not in _cache:
+        _cache[key] = gitignore_patterns(root)
+    r = rel.replace(os.sep, "/")
+    base = os.path.basename(r)
+    for pat in _cache[key]:
+        if pat.endswith("/"):
+            d = pat.rstrip("/")
+            if r == d or r.startswith(d + "/") or ("/" + d + "/") in ("/" + r):
+                return True
+        elif "*" in pat:
+            if fnmatch.fnmatch(r, pat) or fnmatch.fnmatch(base, pat):
+                return True
+        else:
+            if r == pat or r.startswith(pat + "/"):
+                return True
+    return False

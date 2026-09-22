@@ -187,13 +187,13 @@ def _is_internal_script(name):
     ⚠️ 2026-09-22（任务书 D4 同源）：`agent_brief.py`／`sync-to-obsidian.sh` 在 `.gitignore` 里
       （2026-09-21 定的「内部件不进公开仓库」）。若还要求「三份文档必须提到它」，
       就等于**逼着把内部件写进使用者文档** —— 使用者拿到包却没有这个文件，读到只会困惑。
-    判定**复用 `repo_hygiene.is_gitignored`**（同一件事只留一个表达式）。
+    判定**复用 `_common.is_gitignored`**（同一件事只留一个表达式）。
     """
     try:
         if HERE not in sys.path:
             sys.path.insert(0, HERE)
-        import repo_hygiene as _rh
-        return _rh.is_gitignored(os.path.join("scripts", name))
+        from _common import is_gitignored          # 判定在共用模块里（只此一处）
+        return is_gitignored(os.path.join("scripts", name))
     except Exception as e:
         print(f"{WARN} 内部件判定跳过（{type(e).__name__}）：{e}")
         return False

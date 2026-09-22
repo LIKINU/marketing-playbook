@@ -334,10 +334,6 @@ def main():
     ap.add_argument("--template", default="",
                     help="用这份 .docx 当基底：继承它的样式表／页面设置／页眉页脚，"
                          "正文与标题不再直设字体字号（＝「按客户给的文档格式出稿」）")
-    ap.add_argument("--version", default="", help="封面显示版本号（如 v2／第 3 版）；不传则不显示")
-    ap.add_argument("--font", default="",
-                    help="正文字体（默认 微软雅黑）。⚠️ docx 没有 CSS 式「字体栈」—— Mac／WPS "
-                         "缺该字体时由 Word 自行替换；要精确控制字体请用 --template 走模板样式")
     ap.add_argument("--already-checked", action="store_true",
                     help="上游（run_pipeline）已跑过 selfcheck／depth_check → 跳过内部那次重复诊断")
     ap.add_argument("--no-page-number", action="store_true",
@@ -455,10 +451,8 @@ def main():
         print(f"{WARN} 交付稿疑似繁体（{len(_hit)} 种繁体字：{'、'.join(_hit[:12])}…）")
         print(f"{WARN} SKILL 要求对外交付稿用**简体**；请先本地化再交付。")
 
-    global USE_TEMPLATE, CN_FONT
+    global USE_TEMPLATE
     USE_TEMPLATE = bool(args.template)
-    if args.font:            # 字体可配（Mac/WPS 缺 微软雅黑 时可改）
-        CN_FONT = args.font
     if USE_TEMPLATE:
         if not os.path.exists(args.template):
             print(f"{NG} 模板档不存在：{args.template}")
@@ -516,11 +510,6 @@ def main():
         if args.author:
             p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             r = p.add_run(args.author); set_run_font(r, size=12)
-        # ⚠️ 2026-09-22（任务书 C1）：封面补**版本号** —— SKILL 要求封面含项目名／日期／版本，
-        #   原实现只有前两者（方案迭代时「这是哪一版」说不清）。
-        if args.version:
-            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(f"版本：{args.version}"); set_run_font(r, size=11)
 
     # ---- 目录（--no-toc 可省约 1 页；5 页以内的小文档建议省掉）----
     headings = []
